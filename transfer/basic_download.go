@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 
+	"github.com/github/git-lfs/config"
 	"github.com/github/git-lfs/errutil"
 	"github.com/github/git-lfs/httputil"
 	"github.com/github/git-lfs/localstorage"
@@ -66,7 +67,7 @@ func (a *basicDownloadAdapter) checkResumeDownload(t *Transfer) (outFile *os.Fil
 
 	// Successfully opened an existing file at this point
 	// Read any existing data into hash then return file handle at end
-	hash := tools.NewLfsContentHash()
+	hash := config.OidTypeFromConfig(config.Config).GetHasher()
 	n, err := io.Copy(hash, f)
 	if err != nil {
 		f.Close()
@@ -85,7 +86,6 @@ func (a *basicDownloadAdapter) downloadFilename(t *Transfer) string {
 
 // download starts or resumes and download. Always closes dlFile if non-nil
 func (a *basicDownloadAdapter) download(t *Transfer, cb TransferProgressCallback, authOkFunc func(), dlFile *os.File, fromByte int64, hash hash.Hash) error {
-
 	if dlFile != nil {
 		// ensure we always close dlFile. Note that this does not conflict with the
 		// early close below, as close is idempotent.
@@ -182,7 +182,8 @@ func (a *basicDownloadAdapter) download(t *Transfer, cb TransferProgressCallback
 		// pre-load hashing reader with previous content
 		hasher = tools.NewHashingReaderPreloadHash(res.Body, hash)
 	} else {
-		hasher = tools.NewHashingReader(res.Body)
+		newHash := config.OidTypeFromConfig(config.Config).GetHasher()
+		hasher = tools.NewHashingReaderPreloadHash(res.Body, newHash)
 	}
 
 	if dlFile == nil {

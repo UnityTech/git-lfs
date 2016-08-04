@@ -282,6 +282,7 @@ func (a *customAdapter) DoTransfer(ctx interface{}, t *Transfer, cb TransferProg
 	if err != nil {
 		return err
 	}
+	oidType := config.OidTypeFromConfig(config.Config)
 
 	// 1..N replies (including progress & one of download / upload)
 	var complete bool
@@ -311,7 +312,7 @@ func (a *customAdapter) DoTransfer(ctx interface{}, t *Transfer, cb TransferProg
 			}
 			if a.direction == Download {
 				// So we don't have to blindly trust external providers, check SHA
-				if err = tools.VerifyFileHash(t.Object.Oid, resp.Path); err != nil {
+				if err = tools.VerifyFileHash(t.Object.Oid, oidType.GetHasher(), resp.Path); err != nil {
 					return fmt.Errorf("Downloaded file failed checks: %v", err)
 				}
 				// Move file to final location

@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"io"
 	"os"
@@ -54,6 +53,7 @@ func doFsck() (bool, error) {
 	}
 
 	ok := true
+	oidType := config.OidTypeFromConfig(config.Config)
 
 	for oid, name := range pointerIndex {
 		path := lfs.LocalMediaPathReadOnly(oid)
@@ -70,7 +70,7 @@ func doFsck() (bool, error) {
 			return false, err
 		}
 
-		oidHash := sha256.New()
+		oidHash := oidType.GetHasher()
 		_, err = io.Copy(oidHash, f)
 		f.Close()
 		if err != nil {

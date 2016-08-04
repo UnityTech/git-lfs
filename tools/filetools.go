@@ -5,6 +5,7 @@ package tools
 import (
 	"encoding/hex"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"path"
@@ -114,20 +115,19 @@ func CleanPathsDefault(paths, delim string, fallback []string) []string {
 
 // VerifyFileHash reads a file and verifies whether the SHA is correct
 // Returns an error if there is a problem
-func VerifyFileHash(oid, path string) error {
+func VerifyFileHash(oid string, hasher hash.Hash, path string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	h := NewLfsContentHash()
-	_, err = io.Copy(h, f)
+	_, err = io.Copy(hasher, f)
 	if err != nil {
 		return err
 	}
 
-	calcOid := hex.EncodeToString(h.Sum(nil))
+	calcOid := hex.EncodeToString(hasher.Sum(nil))
 	if calcOid != oid {
 		return fmt.Errorf("File %q has an invalid hash %s, expected %s", path, calcOid, oid)
 	}

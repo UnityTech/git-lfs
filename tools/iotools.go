@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"hash"
 	"io"
@@ -51,19 +50,10 @@ func CopyWithCallback(writer io.Writer, reader io.Reader, totalSize int64, cb pr
 	return io.Copy(writer, cbReader)
 }
 
-// Get a new Hash instance of the type used to hash LFS content
-func NewLfsContentHash() hash.Hash {
-	return sha256.New()
-}
-
 // HashingReader wraps a reader and calculates the hash of the data as it is read
 type HashingReader struct {
 	reader io.Reader
 	hasher hash.Hash
-}
-
-func NewHashingReader(r io.Reader) *HashingReader {
-	return &HashingReader{r, NewLfsContentHash()}
 }
 
 func NewHashingReaderPreloadHash(r io.Reader, hash hash.Hash) *HashingReader {

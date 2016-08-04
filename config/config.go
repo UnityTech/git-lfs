@@ -366,6 +366,13 @@ func (c *Configuration) GitProtocol() string {
 	return "https"
 }
 
+func (c *Configuration) OidType() string {
+	if value, ok := c.GitConfig("lfs.oidtype"); ok {
+		return value
+	}
+	return "sha256"
+}
+
 func (c *Configuration) Extensions() map[string]Extension {
 	c.loadGitConfig()
 	return c.extensions
@@ -641,6 +648,7 @@ var safeKeys = []string{
 	"lfs.fetchinclude",
 	"lfs.gitprotocol",
 	"lfs.url",
+	"lfs.oidtype",
 }
 
 // only used for tests

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/github/git-lfs/config"
 	"github.com/github/git-lfs/errutil"
 	"github.com/github/git-lfs/progress"
 )
@@ -23,8 +24,6 @@ var (
 		"https://git-lfs.github.com/spec/v1", // public launch
 	}
 	latest      = "https://git-lfs.github.com/spec/v1"
-	oidType     = "sha256"
-	oidRE       = regexp.MustCompile(`\A[[:alnum:]]{64}`)
 	matcherRE   = regexp.MustCompile("git-media|hawser|git-lfs")
 	extRE       = regexp.MustCompile(`\Aext-\d{1}-\w+`)
 	pointerKeys = []string{"version", "oid", "size"}
@@ -34,7 +33,6 @@ type Pointer struct {
 	Version    string
 	Oid        string
 	Size       int64
-	OidType    string
 	Extensions []*PointerExtension
 }
 
@@ -43,7 +41,6 @@ type PointerExtension struct {
 	Name     string
 	Priority int
 	Oid      string
-	OidType  string
 }
 
 type ByPriority []*PointerExtension
@@ -53,11 +50,11 @@ func (p ByPriority) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
 func (p ByPriority) Less(i, j int) bool { return p[i].Priority < p[j].Priority }
 
 func NewPointer(oid string, size int64, exts []*PointerExtension) *Pointer {
-	return &Pointer{latest, oid, size, oidType, exts}
+	return &Pointer{latest, oid, size, exts}
 }
 
 func NewPointerExtension(name string, priority int, oid string) *PointerExtension {
-	return &PointerExtension{name, priority, oid, oidType}
+	return &PointerExtension{name, priority, oid}
 }
 
 func (p *Pointer) Smudge(writer io.Writer, workingfile string, download bool, cb progress.CopyCallback) error {
@@ -75,10 +72,11 @@ func (p *Pointer) Encoded() string {
 
 	var buffer bytes.Buffer
 	buffer.WriteString(fmt.Sprintf("version %s\n", latest))
+	oidType := config.OidTypeFromConfig(config.Config)
 	for _, ext := range p.Extensions {
-		buffer.WriteString(fmt.Sprintf("ext-%d-%s %s:%s\n", ext.Priority, ext.Name, ext.OidType, ext.Oid))
+		buffer.WriteString(fmt.Sprintf("ext-%d-%s %s:%s\n", ext.Priority, ext.Name, oidType.Name, ext.Oid))
 	}
-	buffer.WriteString(fmt.Sprintf("oid %s:%s\n", p.OidType, p.Oid))
+	buffer.WriteString(fmt.Sprintf("oid %s:%s\n", oidType.Name, p.Oid))
 	buffer.WriteString(fmt.Sprintf("size %d\n", p.Size))
 	return buffer.String()
 }
@@ -187,13 +185,14 @@ func parseOid(value string) (string, error) {
 	if len(parts) != 2 {
 		return "", errors.New("Invalid Oid value: " + value)
 	}
-	if parts[0] != oidType {
-		return "", errors.New("Invalid Oid type: " + parts[0])
-	}
+	oid_type := parts[0]
 	oid := parts[1]
-	if !oidRE.Match([]byte(oid)) {
-		return "", errors.New("Invalid Oid: " + oid)
+
+	expected := config.OidTypeFromConfig(config.Config)
+	if oid_type != expected.Name {
+		return "", fmt.Errorf("This repository uses %s instead got %s for object %s", expected.Name, oid_type, oid)
 	}
+
 	return oid, nil
 }
 

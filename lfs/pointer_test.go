@@ -95,7 +95,6 @@ size 12345`
 	assertEqualWithExample(t, ex, nil, err)
 	assertEqualWithExample(t, ex, latest, p.Version)
 	assertEqualWithExample(t, ex, "4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393", p.Oid)
-	assertEqualWithExample(t, ex, "sha256", p.OidType)
 	assertEqualWithExample(t, ex, int64(12345), p.Size)
 }
 
@@ -112,19 +111,15 @@ size 12345`
 	assertEqualWithExample(t, ex, latest, p.Version)
 	assertEqualWithExample(t, ex, "4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393", p.Oid)
 	assertEqualWithExample(t, ex, int64(12345), p.Size)
-	assertEqualWithExample(t, ex, "sha256", p.OidType)
 	assertEqualWithExample(t, ex, "foo", p.Extensions[0].Name)
 	assertEqualWithExample(t, ex, 0, p.Extensions[0].Priority)
 	assertEqualWithExample(t, ex, "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", p.Extensions[0].Oid)
-	assertEqualWithExample(t, ex, "sha256", p.Extensions[0].OidType)
 	assertEqualWithExample(t, ex, "bar", p.Extensions[1].Name)
 	assertEqualWithExample(t, ex, 1, p.Extensions[1].Priority)
 	assertEqualWithExample(t, ex, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", p.Extensions[1].Oid)
-	assertEqualWithExample(t, ex, "sha256", p.Extensions[1].OidType)
 	assertEqualWithExample(t, ex, "baz", p.Extensions[2].Name)
 	assertEqualWithExample(t, ex, 2, p.Extensions[2].Priority)
 	assertEqualWithExample(t, ex, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", p.Extensions[2].Oid)
-	assertEqualWithExample(t, ex, "sha256", p.Extensions[2].OidType)
 }
 
 func TestDecodeExtensionsSort(t *testing.T) {
@@ -140,19 +135,15 @@ size 12345`
 	assertEqualWithExample(t, ex, latest, p.Version)
 	assertEqualWithExample(t, ex, "4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393", p.Oid)
 	assertEqualWithExample(t, ex, int64(12345), p.Size)
-	assertEqualWithExample(t, ex, "sha256", p.OidType)
 	assertEqualWithExample(t, ex, "foo", p.Extensions[0].Name)
 	assertEqualWithExample(t, ex, 0, p.Extensions[0].Priority)
 	assertEqualWithExample(t, ex, "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", p.Extensions[0].Oid)
-	assertEqualWithExample(t, ex, "sha256", p.Extensions[0].OidType)
 	assertEqualWithExample(t, ex, "bar", p.Extensions[1].Name)
 	assertEqualWithExample(t, ex, 1, p.Extensions[1].Priority)
 	assertEqualWithExample(t, ex, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", p.Extensions[1].Oid)
-	assertEqualWithExample(t, ex, "sha256", p.Extensions[1].OidType)
 	assertEqualWithExample(t, ex, "baz", p.Extensions[2].Name)
 	assertEqualWithExample(t, ex, 2, p.Extensions[2].Priority)
 	assertEqualWithExample(t, ex, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", p.Extensions[2].Oid)
-	assertEqualWithExample(t, ex, "sha256", p.Extensions[2].OidType)
 }
 
 func TestDecodePreRelease(t *testing.T) {
@@ -164,7 +155,6 @@ size 12345`
 	assertEqualWithExample(t, ex, nil, err)
 	assertEqualWithExample(t, ex, latest, p.Version)
 	assertEqualWithExample(t, ex, "4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393", p.Oid)
-	assertEqualWithExample(t, ex, "sha256", p.OidType)
 	assertEqualWithExample(t, ex, int64(12345), p.Size)
 }
 

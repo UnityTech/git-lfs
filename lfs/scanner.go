@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/github/git-lfs/config"
 	"github.com/github/git-lfs/git"
 	"github.com/github/git-lfs/tools"
 	"github.com/rubyist/tracerx"
@@ -30,17 +31,6 @@ const (
 	// chanBufSize is the size of the channels used to pass data from one
 	// sub-process to another.
 	chanBufSize = 100
-)
-
-var (
-	// Arguments to append to a git log call which will limit the output to
-	// lfs changes and format the output suitable for parseLogOutput.. method(s)
-	logLfsSearchArgs = []string{
-		"-G", "oid sha256:", // only diffs which include an lfs file SHA change
-		"-p",   // include diff so we can read the SHA
-		"-U12", // Make sure diff context is always big enough to support 10 extension lines to get whole pointer
-		`--format=lfs-commit-sha: %H %P`, // just a predictable commit header we can detect
-	}
 )
 
 // WrappedPointer wraps a pointer.Pointer and provides the git sha1
@@ -893,7 +883,7 @@ func ScanUnpushedToChan(remoteName string) (*PointerChannelWrapper, error) {
 		logArgs = append(logArgs, fmt.Sprintf("--remotes=%v", remoteName))
 	}
 	// Add standard search args to find lfs references
-	logArgs = append(logArgs, logLfsSearchArgs...)
+	logArgs = append(logArgs, getSearchArgs()...)
 
 	cmd, err := startCommand("git", logArgs...)
 	if err != nil {
@@ -927,7 +917,7 @@ func logPreviousSHAs(ref string, since time.Time) (*PointerChannelWrapper, error
 		fmt.Sprintf("--since=%v", git.FormatGitDate(since)),
 	}
 	// Add standard search args to find lfs references
-	logArgs = append(logArgs, logLfsSearchArgs...)
+	logArgs = append(logArgs, getSearchArgs()...)
 	// ending at ref
 	logArgs = append(logArgs, ref)
 
@@ -957,6 +947,18 @@ func logPreviousSHAs(ref string, since time.Time) (*PointerChannelWrapper, error
 
 	return NewPointerChannelWrapper(pchan, errchan), nil
 
+}
+
+func getSearchArgs() []string {
+	oid_match := fmt.Sprintf("oid %s:", config.Config.OidType())
+	// Arguments to append to a git log call which will limit the output to
+	// lfs changes and format the output suitable for parseLogOutput.. method(s)
+	return []string{
+		"-G", oid_match, // only diffs which include an lfs file SHA change
+		"-p",   // include diff so we can read the SHA
+		"-U12", // Make sure diff context is always big enough to support 10 extension lines to get whole pointer
+		`--format=lfs-commit-sha: %H %P`, // just a predictable commit header we can detect
+	}
 }
 
 // When scanning diffs e.g. parseLogOutputToPointers, which direction of diff to include
@@ -997,7 +999,7 @@ func parseLogOutputToPointers(log io.Reader, dir LogDiffDirection,
 	commitHeaderRegex := regexp.MustCompile(`^lfs-commit-sha: ([A-Fa-f0-9]{40})(?: ([A-Fa-f0-9]{40}))*`)
 	fileHeaderRegex := regexp.MustCompile(`diff --git a\/(.+?)\s+b\/(.+)`)
 	fileMergeHeaderRegex := regexp.MustCompile(`diff --cc (.+)`)
-	pointerDataRegex := regexp.MustCompile(`^([\+\- ])(version https://git-lfs|oid sha256|size|ext-).*$`)
+	pointerDataRegex := regexp.MustCompile(`^([\+\- ])(version https://git-lfs|oid|size|ext-).*$`)
 	var pointerData bytes.Buffer
 	var currentFilename string
 	currentFileIncluded := true

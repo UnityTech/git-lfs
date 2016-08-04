@@ -2,7 +2,6 @@ package commands
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -10,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 
+	"github.com/github/git-lfs/config"
 	"github.com/github/git-lfs/lfs"
 	"github.com/spf13/cobra"
 )
@@ -30,6 +30,8 @@ func pointerCommand(cmd *cobra.Command, args []string) {
 	buildOid := ""
 	compareOid := ""
 
+	oidType := config.OidTypeFromConfig(config.Config)
+
 	if len(pointerCompare) > 0 || pointerStdin {
 		comparing = true
 	}
@@ -42,7 +44,7 @@ func pointerCommand(cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 
-		oidHash := sha256.New()
+		oidHash := oidType.GetHasher()
 		size, err := io.Copy(oidHash, buildFile)
 		buildFile.Close()
 

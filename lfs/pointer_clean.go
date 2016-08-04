@@ -2,7 +2,6 @@ package lfs
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/hex"
 	"io"
 	"os"
@@ -62,6 +61,10 @@ func PointerClean(reader io.Reader, fileName string, fileSize int64, cb progress
 }
 
 func copyToTemp(reader io.Reader, fileSize int64, cb progress.CopyCallback) (oid string, size int64, tmp *os.File, err error) {
+	if err != nil {
+		return
+	}
+
 	tmp, err = TempFile("")
 	if err != nil {
 		return
@@ -69,7 +72,7 @@ func copyToTemp(reader io.Reader, fileSize int64, cb progress.CopyCallback) (oid
 
 	defer tmp.Close()
 
-	oidHash := sha256.New()
+	oidHash := config.OidTypeFromConfig(config.Config).GetHasher()
 	writer := io.MultiWriter(oidHash, tmp)
 
 	if fileSize == 0 {

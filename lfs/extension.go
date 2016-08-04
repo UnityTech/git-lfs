@@ -2,7 +2,6 @@ package lfs
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"hash"
@@ -64,7 +63,8 @@ func pipeExtensions(request *pipeRequest) (response pipeResponse, err error) {
 		extcmds = append(extcmds, ec)
 	}
 
-	hasher := sha256.New()
+	oidType := config.OidTypeFromConfig(config.Config)
+	hasher := oidType.GetHasher()
 	pipeReader, pipeWriter := io.Pipe()
 	multiWriter := io.MultiWriter(hasher, pipeWriter)
 
@@ -80,7 +80,7 @@ func pipeExtensions(request *pipeRequest) (response pipeResponse, err error) {
 
 	last := len(extcmds) - 1
 	for i, ec := range extcmds {
-		ec.hasher = sha256.New()
+		ec.hasher = oidType.GetHasher()
 
 		if i == last {
 			ec.cmd.Stdout = io.MultiWriter(ec.hasher, output)
