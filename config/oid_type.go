@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/md5"
 	"crypto/sha256"
 	"hash"
 	"regexp"
@@ -9,6 +10,7 @@ import (
 var (
 	OidTypes = []*OidType{
 		NewOidType("sha256", regexp.MustCompile(`\A[[:alnum:]]{64}`)),
+		NewOidType("md5", regexp.MustCompile(`\A[[:alnum:]]{32}`)),
 	}
 )
 
@@ -36,6 +38,8 @@ func (h *OidType) GetHasher() hash.Hash {
 	switch h.Name {
 	case "sha256":
 		return sha256.New()
+	case "md5":
+		return md5.New()
 	default:
 		return nil
 	}
