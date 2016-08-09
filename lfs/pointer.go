@@ -189,6 +189,10 @@ func parseOid(value string) (string, error) {
 	oid := parts[1]
 
 	expected := config.OidTypeFromConfig(config.Config)
+
+	if !expected.Validator.Match([]byte(oid)) {
+		return "", errors.New("Invalid Oid: " + oid)
+	}
 	if oid_type != expected.Name {
 		return "", fmt.Errorf("This repository uses %s instead got %s for object %s", expected.Name, oid_type, oid)
 	}
