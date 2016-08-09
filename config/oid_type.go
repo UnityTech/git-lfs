@@ -23,15 +23,18 @@ func NewOidType(name string, validator *regexp.Regexp) *OidType {
 	return &OidType{Name: name, Validator: validator}
 }
 
-func OidTypeFromConfig(c *Configuration) *OidType {
-	var name = c.OidType()
+func FindOidType(name string) *OidType {
 	for _, o := range OidTypes {
 		if o.Name == name {
 			return o
 		}
 	}
 	return OidTypes[0]
+}
 
+func OidTypeFromConfig(c *Configuration) *OidType {
+	var name = c.OidType()
+	return FindOidType(name)
 }
 
 func (h *OidType) GetHasher() hash.Hash {

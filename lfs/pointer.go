@@ -32,6 +32,7 @@ var (
 type Pointer struct {
 	Version    string
 	Oid        string
+	OidType    *config.OidType
 	Size       int64
 	Extensions []*PointerExtension
 }
@@ -41,6 +42,7 @@ type PointerExtension struct {
 	Name     string
 	Priority int
 	Oid      string
+	OidType  *config.OidType
 }
 
 type ByPriority []*PointerExtension
@@ -49,12 +51,12 @@ func (p ByPriority) Len() int           { return len(p) }
 func (p ByPriority) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
 func (p ByPriority) Less(i, j int) bool { return p[i].Priority < p[j].Priority }
 
-func NewPointer(oid string, size int64, exts []*PointerExtension) *Pointer {
-	return &Pointer{latest, oid, size, exts}
+func NewPointer(oid string, oidType *config.OidType, size int64, exts []*PointerExtension) *Pointer {
+	return &Pointer{latest, oid, oidType, size, exts}
 }
 
-func NewPointerExtension(name string, priority int, oid string) *PointerExtension {
-	return &PointerExtension{name, priority, oid}
+func NewPointerExtension(name string, priority int, oid string, oidType *config.OidType) *PointerExtension {
+	return &PointerExtension{name, priority, oid, oidType}
 }
 
 func (p *Pointer) Smudge(writer io.Writer, workingfile string, download bool, cb progress.CopyCallback) error {
@@ -72,11 +74,10 @@ func (p *Pointer) Encoded() string {
 
 	var buffer bytes.Buffer
 	buffer.WriteString(fmt.Sprintf("version %s\n", latest))
-	oidType := config.OidTypeFromConfig(config.Config)
 	for _, ext := range p.Extensions {
-		buffer.WriteString(fmt.Sprintf("ext-%d-%s %s:%s\n", ext.Priority, ext.Name, oidType.Name, ext.Oid))
+		buffer.WriteString(fmt.Sprintf("ext-%d-%s %s:%s\n", ext.Priority, ext.Name, ext.OidType.Name, ext.Oid))
 	}
-	buffer.WriteString(fmt.Sprintf("oid %s:%s\n", oidType.Name, p.Oid))
+	buffer.WriteString(fmt.Sprintf("oid %s:%s\n", p.OidType.Name, p.Oid))
 	buffer.WriteString(fmt.Sprintf("size %d\n", p.Size))
 	return buffer.String()
 }
@@ -151,7 +152,7 @@ func decodeKV(data []byte) (*Pointer, error) {
 		return nil, errors.New("Invalid Oid")
 	}
 
-	oid, err := parseOid(value)
+	oid, oidtype, err := parseOid(value)
 	if err != nil {
 		return nil, err
 	}
@@ -177,13 +178,13 @@ func decodeKV(data []byte) (*Pointer, error) {
 		sort.Sort(ByPriority(extensions))
 	}
 
-	return NewPointer(oid, size, extensions), nil
+	return NewPointer(oid, oidtype, size, extensions), nil
 }
 
-func parseOid(value string) (string, error) {
+func parseOid(value string) (string, *config.OidType, error) {
 	parts := strings.SplitN(value, ":", 2)
 	if len(parts) != 2 {
-		return "", errors.New("Invalid Oid value: " + value)
+		return "", nil, errors.New("Invalid Oid value: " + value)
 	}
 	oid_type := parts[0]
 	oid := parts[1]
@@ -191,13 +192,13 @@ func parseOid(value string) (string, error) {
 	expected := config.OidTypeFromConfig(config.Config)
 
 	if !expected.Validator.Match([]byte(oid)) {
-		return "", errors.New("Invalid Oid: " + oid)
+		return "", nil, errors.New("Invalid Oid: " + oid)
 	}
 	if oid_type != expected.Name {
-		return "", fmt.Errorf("This repository uses %s instead got %s for object %s", expected.Name, oid_type, oid)
+		return "", nil, fmt.Errorf("This repository uses %s instead got %s for object %s", expected.Name, oid_type, oid)
 	}
 
-	return oid, nil
+	return oid, expected, nil
 }
 
 func parsePointerExtension(key string, value string) (*PointerExtension, error) {
@@ -213,12 +214,12 @@ func parsePointerExtension(key string, value string) (*PointerExtension, error) 
 
 	name := keyParts[2]
 
-	oid, err := parseOid(value)
+	oid, oidtype, err := parseOid(value)
 	if err != nil {
 		return nil, err
 	}
 
-	return NewPointerExtension(name, p, oid), nil
+	return NewPointerExtension(name, p, oid, oidtype), nil
 }
 
 func validatePointerExtensions(exts []*PointerExtension) error {

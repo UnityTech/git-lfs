@@ -23,6 +23,8 @@ func PointerClean(reader io.Reader, fileName string, fileSize int64, cb progress
 		return nil, err
 	}
 
+	oidType := config.OidTypeFromConfig(config.Config)
+
 	var oid string
 	var size int64
 	var tmp *os.File
@@ -45,7 +47,7 @@ func PointerClean(reader io.Reader, fileName string, fileSize int64, cb progress
 
 		for _, result := range response.results {
 			if result.oidIn != result.oidOut {
-				ext := NewPointerExtension(result.name, len(exts), result.oidIn)
+				ext := NewPointerExtension(result.name, len(exts), result.oidIn, oidType)
 				exts = append(exts, ext)
 			}
 		}
@@ -56,7 +58,7 @@ func PointerClean(reader io.Reader, fileName string, fileSize int64, cb progress
 		}
 	}
 
-	pointer := NewPointer(oid, size, exts)
+	pointer := NewPointer(oid, oidType, size, exts)
 	return &cleanedAsset{tmp.Name(), pointer}, err
 }
 

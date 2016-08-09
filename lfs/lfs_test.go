@@ -5,6 +5,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/github/git-lfs/config"
 	"github.com/github/git-lfs/lfs"
 	"github.com/github/git-lfs/test"
 	"github.com/stretchr/testify/assert"
@@ -57,8 +58,9 @@ func TestAllCurrentObjectsSome(t *testing.T) {
 
 	actualObjects := lfs.AllObjects()
 	actual := make([]*lfs.Pointer, len(actualObjects))
+	oidType := config.OidTypeFromConfig(config.Config)
 	for idx, f := range actualObjects {
-		actual[idx] = lfs.NewPointer(f.Oid, f.Size, nil)
+		actual[idx] = lfs.NewPointer(f.Oid, oidType, f.Size, nil)
 	}
 
 	// sort to ensure comparison is equal

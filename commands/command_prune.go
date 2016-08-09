@@ -132,6 +132,8 @@ func prune(verifyRemote, dryRun, verbose bool) {
 		verifyc = verifyQueue.Watch()
 	}
 
+	oidType := config.OidTypeFromConfig(config.Config)
+
 	for _, file := range localObjects {
 		if !retainedObjects.Contains(file.Oid) {
 			prunableObjects = append(prunableObjects, file.Oid)
@@ -143,7 +145,7 @@ func prune(verifyRemote, dryRun, verbose bool) {
 
 			if verifyRemote {
 				tracerx.Printf("VERIFYING: %v", file.Oid)
-				pointer := lfs.NewPointer(file.Oid, file.Size, nil)
+				pointer := lfs.NewPointer(file.Oid, oidType, file.Size, nil)
 				verifyQueue.Add(lfs.NewDownloadable(&lfs.WrappedPointer{Pointer: pointer}))
 			}
 		}
