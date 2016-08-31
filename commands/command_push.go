@@ -4,7 +4,6 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/github/git-lfs/config"
 	"github.com/github/git-lfs/git"
 	"github.com/github/git-lfs/lfs"
 	"github.com/rubyist/tracerx"
@@ -12,10 +11,6 @@ import (
 )
 
 var (
-	pushCmd = &cobra.Command{
-		Use: "push",
-		Run: pushCommand,
-	}
 	pushDryRun    = false
 	pushObjectIDs = false
 	pushAll       = false
@@ -29,7 +24,7 @@ func uploadsBetweenRefs(ctx *uploadContext, left string, right string) {
 
 	scanOpt := lfs.NewScanRefsOptions()
 	scanOpt.ScanMode = lfs.ScanRefsMode
-	scanOpt.RemoteName = config.Config.CurrentRemote
+	scanOpt.RemoteName = cfg.CurrentRemote
 
 	pointers, err := lfs.ScanRefs(left, right, scanOpt)
 	if err != nil {
@@ -40,11 +35,11 @@ func uploadsBetweenRefs(ctx *uploadContext, left string, right string) {
 }
 
 func uploadsBetweenRefAndRemote(ctx *uploadContext, refnames []string) {
-	tracerx.Printf("Upload refs %v to remote %v", refnames, config.Config.CurrentRemote)
+	tracerx.Printf("Upload refs %v to remote %v", refnames, cfg.CurrentRemote)
 
 	scanOpt := lfs.NewScanRefsOptions()
 	scanOpt.ScanMode = lfs.ScanLeftToRemoteMode
-	scanOpt.RemoteName = config.Config.CurrentRemote
+	scanOpt.RemoteName = cfg.CurrentRemote
 
 	if pushAll {
 		scanOpt.ScanMode = lfs.ScanRefsMode
@@ -118,12 +113,14 @@ func pushCommand(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	requireGitVersion()
+
 	// Remote is first arg
 	if err := git.ValidateRemote(args[0]); err != nil {
 		Exit("Invalid remote name %q", args[0])
 	}
 
-	config.Config.CurrentRemote = args[0]
+	cfg.CurrentRemote = args[0]
 	ctx := newUploadContext(pushDryRun)
 
 	if useStdin {
@@ -166,10 +163,17 @@ func pushCommand(cmd *cobra.Command, args []string) {
 }
 
 func init() {
-	pushCmd.Flags().BoolVarP(&pushDryRun, "dry-run", "d", false, "Do everything except actually send the updates")
-	pushCmd.Flags().BoolVarP(&useStdin, "stdin", "s", false, "Take refs on stdin (for pre-push hook)")
-	pushCmd.Flags().BoolVarP(&pushObjectIDs, "object-id", "o", false, "Push LFS object ID(s)")
-	pushCmd.Flags().BoolVarP(&pushAll, "all", "a", false, "Push all objects for the current ref to the remote.")
+	RegisterSubcommand(func() *cobra.Command {
+		cmd := &cobra.Command{
+			Use:    "push",
+			PreRun: resolveLocalStorage,
+			Run:    pushCommand,
+		}
 
-	RootCmd.AddCommand(pushCmd)
+		cmd.Flags().BoolVarP(&pushDryRun, "dry-run", "d", false, "Do everything except actually send the updates")
+		cmd.Flags().BoolVarP(&useStdin, "stdin", "s", false, "Take refs on stdin (for pre-push hook)")
+		cmd.Flags().BoolVarP(&pushObjectIDs, "object-id", "o", false, "Push LFS object ID(s)")
+		cmd.Flags().BoolVarP(&pushAll, "all", "a", false, "Push all objects for the current ref to the remote.")
+		return cmd
+	})
 }

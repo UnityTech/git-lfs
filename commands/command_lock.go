@@ -22,15 +22,10 @@ var (
 	setLockRemoteFor = func(c *config.Configuration) {
 		c.CurrentRemote = lockRemote
 	}
-
-	lockCmd = &cobra.Command{
-		Use: "lock",
-		Run: lockCommand,
-	}
 )
 
 func lockCommand(cmd *cobra.Command, args []string) {
-	setLockRemoteFor(config.Config)
+	setLockRemoteFor(cfg)
 
 	if len(args) == 0 {
 		Print("Usage: git lfs lock <path>")
@@ -107,9 +102,18 @@ func lockPath(file string) (string, error) {
 }
 
 func init() {
-	lockCmd.Flags().StringVarP(&lockRemote, "remote", "r", config.Config.CurrentRemote, lockRemoteHelp)
+	RegisterSubcommand(func() *cobra.Command {
+		if !isCommandEnabled(cfg, "locks") {
+			return nil
+		}
 
-	if isCommandEnabled(config.Config, "locks") {
-		RootCmd.AddCommand(lockCmd)
-	}
+		cmd := &cobra.Command{
+			Use:    "lock",
+			PreRun: resolveLocalStorage,
+			Run:    lockCommand,
+		}
+
+		cmd.Flags().StringVarP(&lockRemote, "remote", "r", cfg.CurrentRemote, lockRemoteHelp)
+		return cmd
+	})
 }

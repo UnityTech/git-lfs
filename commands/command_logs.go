@@ -1,41 +1,13 @@
 package commands
 
 import (
-	"errors"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 
 	"github.com/github/git-lfs/config"
-	"github.com/github/git-lfs/errutil"
+	"github.com/github/git-lfs/errors"
 	"github.com/spf13/cobra"
-)
-
-var (
-	logsCmd = &cobra.Command{
-		Use: "logs",
-		Run: logsCommand,
-	}
-
-	logsLastCmd = &cobra.Command{
-		Use: "last",
-		Run: logsLastCommand,
-	}
-
-	logsShowCmd = &cobra.Command{
-		Use: "show",
-		Run: logsShowCommand,
-	}
-
-	logsClearCmd = &cobra.Command{
-		Use: "clear",
-		Run: logsClearCommand,
-	}
-
-	logsBoomtownCmd = &cobra.Command{
-		Use: "boomtown",
-		Run: logsBoomtownCommand,
-	}
 )
 
 func logsCommand(cmd *cobra.Command, args []string) {
@@ -81,7 +53,7 @@ func logsClearCommand(cmd *cobra.Command, args []string) {
 
 func logsBoomtownCommand(cmd *cobra.Command, args []string) {
 	Debug("Debug message")
-	err := errutil.Errorf(errors.New("Inner error message!"), "Error!")
+	err := errors.Wrapf(errors.New("Inner error message!"), "Error")
 	Panic(err, "Welcome to Boomtown")
 	Debug("Never seen")
 }
@@ -104,6 +76,35 @@ func sortedLogs() []string {
 }
 
 func init() {
-	logsCmd.AddCommand(logsLastCmd, logsShowCmd, logsClearCmd, logsBoomtownCmd)
-	RootCmd.AddCommand(logsCmd)
+	RegisterSubcommand(func() *cobra.Command {
+		cmd := &cobra.Command{
+			Use:    "logs",
+			PreRun: resolveLocalStorage,
+			Run:    logsCommand,
+		}
+
+		cmd.AddCommand(
+			&cobra.Command{
+				Use:    "last",
+				PreRun: resolveLocalStorage,
+				Run:    logsLastCommand,
+			},
+			&cobra.Command{
+				Use:    "show",
+				PreRun: resolveLocalStorage,
+				Run:    logsShowCommand,
+			},
+			&cobra.Command{
+				Use:    "clear",
+				PreRun: resolveLocalStorage,
+				Run:    logsClearCommand,
+			},
+			&cobra.Command{
+				Use:    "boomtown",
+				PreRun: resolveLocalStorage,
+				Run:    logsBoomtownCommand,
+			},
+		)
+		return cmd
+	})
 }

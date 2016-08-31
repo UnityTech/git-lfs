@@ -12,7 +12,7 @@ import (
 
 	"github.com/github/git-lfs/api"
 	"github.com/github/git-lfs/config"
-	"github.com/github/git-lfs/errutil"
+	"github.com/github/git-lfs/errors"
 	"github.com/github/git-lfs/lfs"
 	"github.com/github/git-lfs/test"
 	"github.com/spf13/cobra"
@@ -170,7 +170,7 @@ func buildTestData() (oidsExist, oidsMissing []TestObject, err error) {
 	uploadQueue.Wait()
 
 	for _, err := range uploadQueue.Errors() {
-		if errutil.IsFatalError(err) {
+		if errors.IsFatalError(err) {
 			exit("Fatal error setting up test data: %s", err)
 		}
 	}
@@ -250,7 +250,7 @@ func callBatchApi(op string, objs []TestObject) ([]*api.ObjectResource, error) {
 	for _, o := range objs {
 		apiobjs = append(apiobjs, &api.ObjectResource{Oid: o.Oid, Size: o.Size})
 	}
-	o, _, err := api.Batch(apiobjs, op, []string{"basic"})
+	o, _, err := api.Batch(config.Config, apiobjs, op, []string{"basic"})
 	if err != nil {
 		return nil, err
 	}

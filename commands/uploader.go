@@ -3,7 +3,7 @@ package commands
 import (
 	"os"
 
-	"github.com/github/git-lfs/errutil"
+	"github.com/github/git-lfs/errors"
 	"github.com/github/git-lfs/lfs"
 	"github.com/github/git-lfs/tools"
 )
@@ -129,8 +129,8 @@ func upload(c *uploadContext, unfiltered []*lfs.WrappedPointer) {
 	for _, p := range pointers {
 		u, err := lfs.NewUploadable(p.Oid, p.Name)
 		if err != nil {
-			if errutil.IsCleanPointerError(err) {
-				Exit(uploadMissingErr, p.Oid, p.Name, errutil.ErrorGetContext(err, "pointer").(*lfs.Pointer).Oid)
+			if errors.IsCleanPointerError(err) {
+				Exit(uploadMissingErr, p.Oid, p.Name, errors.GetContext(err, "pointer").(*lfs.Pointer).Oid)
 			} else {
 				ExitWithError(err)
 			}
@@ -143,14 +143,7 @@ func upload(c *uploadContext, unfiltered []*lfs.WrappedPointer) {
 	q.Wait()
 
 	for _, err := range q.Errors() {
-		if Debugging || errutil.IsFatalError(err) {
-			LoggedError(err, err.Error())
-		} else {
-			if inner := errutil.GetInnerError(err); inner != nil {
-				Error(inner.Error())
-			}
-			Error(err.Error())
-		}
+		FullError(err)
 	}
 
 	if len(q.Errors()) > 0 {

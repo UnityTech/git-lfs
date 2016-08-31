@@ -9,7 +9,7 @@ import (
 	"strconv"
 
 	"github.com/github/git-lfs/config"
-	"github.com/github/git-lfs/errutil"
+	"github.com/github/git-lfs/errors"
 	"github.com/github/git-lfs/git"
 	"github.com/github/git-lfs/httputil"
 	"github.com/github/git-lfs/tools"
@@ -20,16 +20,16 @@ import (
 // BatchOrLegacy calls the Batch API and falls back on the Legacy API
 // This is for simplicity, legacy route is not most optimal (serial)
 // TODO LEGACY API: remove when legacy API removed
-func BatchOrLegacy(objects []*ObjectResource, operation string, transferAdapters []string) (objs []*ObjectResource, transferAdapter string, e error) {
-	if !config.Config.BatchTransfer() {
-		objs, err := Legacy(objects, operation)
+func BatchOrLegacy(cfg *config.Configuration, objects []*ObjectResource, operation string, transferAdapters []string) (objs []*ObjectResource, transferAdapter string, e error) {
+	if !cfg.BatchTransfer() {
+		objs, err := Legacy(cfg, objects, operation)
 		return objs, "", err
 	}
-	objs, adapterName, err := Batch(objects, operation, transferAdapters)
+	objs, adapterName, err := Batch(cfg, objects, operation, transferAdapters)
 	if err != nil {
-		if errutil.IsNotImplementedError(err) {
+		if errors.IsNotImplementedError(err) {
 			git.Config.SetLocal("", "lfs.batch", "false")
-			objs, err := Legacy(objects, operation)
+			objs, err := Legacy(cfg, objects, operation)
 			return objs, "", err
 		}
 		return nil, "", err
@@ -37,8 +37,8 @@ func BatchOrLegacy(objects []*ObjectResource, operation string, transferAdapters
 	return objs, adapterName, nil
 }
 
-func BatchOrLegacySingle(inobj *ObjectResource, operation string, transferAdapters []string) (obj *ObjectResource, transferAdapter string, e error) {
-	objs, adapterName, err := BatchOrLegacy([]*ObjectResource{inobj}, operation, transferAdapters)
+func BatchOrLegacySingle(cfg *config.Configuration, inobj *ObjectResource, operation string, transferAdapters []string) (obj *ObjectResource, transferAdapter string, e error) {
+	objs, adapterName, err := BatchOrLegacy(cfg, []*ObjectResource{inobj}, operation, transferAdapters)
 	if err != nil {
 		return nil, "", err
 	}
@@ -49,7 +49,7 @@ func BatchOrLegacySingle(inobj *ObjectResource, operation string, transferAdapte
 }
 
 // Batch calls the batch API and returns object results
-func Batch(objects []*ObjectResource, operation string, transferAdapters []string) (objs []*ObjectResource, transferAdapter string, e error) {
+func Batch(cfg *config.Configuration, objects []*ObjectResource, operation string, transferAdapters []string) (objs []*ObjectResource, transferAdapter string, e error) {
 	if len(objects) == 0 {
 		return nil, "", nil
 	}
@@ -63,12 +63,12 @@ func Batch(objects []*ObjectResource, operation string, transferAdapters []strin
 	o := &batchRequest{Operation: operation, Objects: objects, TransferAdapterNames: transferAdapters}
 	by, err := json.Marshal(o)
 	if err != nil {
-		return nil, "", errutil.Error(err)
+		return nil, "", errors.Wrap(err, "batch request")
 	}
 
-	req, err := NewBatchRequest(operation)
+	req, err := NewBatchRequest(cfg, operation)
 	if err != nil {
-		return nil, "", errutil.Error(err)
+		return nil, "", errors.Wrap(err, "batch request")
 	}
 
 	req.Header.Set("Content-Type", MediaType)
@@ -78,36 +78,34 @@ func Batch(objects []*ObjectResource, operation string, transferAdapters []strin
 
 	tracerx.Printf("api: batch %d files", len(objects))
 
-	res, bresp, err := DoBatchRequest(req)
+	res, bresp, err := DoBatchRequest(cfg, req)
 
 	if err != nil {
-
 		if res == nil {
-			return nil, "", errutil.NewRetriableError(err)
+			return nil, "", errors.NewRetriableError(err)
 		}
 
 		if res.StatusCode == 0 {
-			return nil, "", errutil.NewRetriableError(err)
+			return nil, "", errors.NewRetriableError(err)
 		}
 
-		if errutil.IsAuthError(err) {
-			httputil.SetAuthType(req, res)
-			return Batch(objects, operation, transferAdapters)
+		if errors.IsAuthError(err) {
+			httputil.SetAuthType(cfg, req, res)
+			return Batch(cfg, objects, operation, transferAdapters)
 		}
 
 		switch res.StatusCode {
 		case 404, 410:
-			tracerx.Printf("api: batch not implemented: %d", res.StatusCode)
-			return nil, "", errutil.NewNotImplementedError(nil)
+			return nil, "", errors.NewNotImplementedError(errors.Errorf("api: batch not implemented: %d", res.StatusCode))
 		}
 
 		tracerx.Printf("api error: %s", err)
-		return nil, "", errutil.Error(err)
+		return nil, "", errors.Wrap(err, "batch response")
 	}
-	httputil.LogTransfer("lfs.batch", res)
+	httputil.LogTransfer(cfg, "lfs.batch", res)
 
 	if res.StatusCode != 200 {
-		return nil, "", errutil.Error(fmt.Errorf("Invalid status for %s: %d", httputil.TraceHttpReq(req), res.StatusCode))
+		return nil, "", errors.Errorf("Invalid status for %s: %d", httputil.TraceHttpReq(req), res.StatusCode)
 	}
 
 	return bresp.Objects, bresp.TransferAdapterName, nil
@@ -115,7 +113,7 @@ func Batch(objects []*ObjectResource, operation string, transferAdapters []strin
 
 // Legacy calls the legacy API serially and returns ObjectResources
 // TODO LEGACY API: remove when legacy API removed
-func Legacy(objects []*ObjectResource, operation string) ([]*ObjectResource, error) {
+func Legacy(cfg *config.Configuration, objects []*ObjectResource, operation string) ([]*ObjectResource, error) {
 	retobjs := make([]*ObjectResource, 0, len(objects))
 	dl := operation == "download"
 	var globalErr error
@@ -123,9 +121,9 @@ func Legacy(objects []*ObjectResource, operation string) ([]*ObjectResource, err
 		var ret *ObjectResource
 		var err error
 		if dl {
-			ret, err = DownloadCheck(o.Oid)
+			ret, err = DownloadCheck(cfg, o.Oid)
 		} else {
-			ret, err = UploadCheck(o.Oid, o.Size)
+			ret, err = UploadCheck(cfg, o.Oid, o.Size)
 		}
 		if err != nil {
 			// Store for the end, likely only one
@@ -137,29 +135,29 @@ func Legacy(objects []*ObjectResource, operation string) ([]*ObjectResource, err
 }
 
 // TODO LEGACY API: remove when legacy API removed
-func DownloadCheck(oid string) (*ObjectResource, error) {
-	req, err := NewRequest("GET", oid)
+func DownloadCheck(cfg *config.Configuration, oid string) (*ObjectResource, error) {
+	req, err := NewRequest(cfg, "GET", oid)
 	if err != nil {
-		return nil, errutil.Error(err)
+		return nil, errors.Wrap(err, "download check")
 	}
 
-	res, obj, err := DoLegacyRequest(req)
+	res, obj, err := DoLegacyRequest(cfg, req)
 	if err != nil {
 		return nil, err
 	}
-	httputil.LogTransfer("lfs.download", res)
+
+	httputil.LogTransfer(cfg, "lfs.download", res)
 
 	_, err = obj.NewRequest("download", "GET")
 	if err != nil {
-		return nil, errutil.Error(err)
+		return nil, errors.Wrap(err, "download check")
 	}
 
 	return obj, nil
 }
 
 // TODO LEGACY API: remove when legacy API removed
-func UploadCheck(oid string, size int64) (*ObjectResource, error) {
-
+func UploadCheck(cfg *config.Configuration, oid string, size int64) (*ObjectResource, error) {
 	reqObj := &ObjectResource{
 		Oid:  oid,
 		Size: size,
@@ -167,12 +165,12 @@ func UploadCheck(oid string, size int64) (*ObjectResource, error) {
 
 	by, err := json.Marshal(reqObj)
 	if err != nil {
-		return nil, errutil.Error(err)
+		return nil, errors.Wrap(err, "upload check")
 	}
 
-	req, err := NewRequest("POST", oid)
+	req, err := NewRequest(cfg, "POST", oid)
 	if err != nil {
-		return nil, errutil.Error(err)
+		return nil, errors.Wrap(err, "upload check")
 	}
 
 	req.Header.Set("Content-Type", MediaType)
@@ -181,17 +179,17 @@ func UploadCheck(oid string, size int64) (*ObjectResource, error) {
 	req.Body = tools.NewReadSeekCloserWrapper(bytes.NewReader(by))
 
 	tracerx.Printf("api: uploading (%s)", oid)
-	res, obj, err := DoLegacyRequest(req)
+	res, obj, err := DoLegacyRequest(cfg, req)
 
 	if err != nil {
-		if errutil.IsAuthError(err) {
-			httputil.SetAuthType(req, res)
-			return UploadCheck(oid, size)
+		if errors.IsAuthError(err) {
+			httputil.SetAuthType(cfg, req, res)
+			return UploadCheck(cfg, oid, size)
 		}
 
-		return nil, errutil.NewRetriableError(err)
+		return nil, errors.NewRetriableError(err)
 	}
-	httputil.LogTransfer("lfs.upload", res)
+	httputil.LogTransfer(cfg, "lfs.upload", res)
 
 	if res.StatusCode == 200 {
 		return nil, nil

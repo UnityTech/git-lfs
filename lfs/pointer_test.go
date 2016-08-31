@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/github/git-lfs/config"
-	"github.com/github/git-lfs/errutil"
+	"github.com/github/git-lfs/errors"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -63,7 +63,7 @@ func TestEncodeExtensions(t *testing.T) {
 	assertLine(t, bufReader, "version https://git-lfs.github.com/spec/v1\n")
 	assertLine(t, bufReader, "ext-0-foo sha256:foo_oid\n")
 	assertLine(t, bufReader, "ext-1-bar sha256:bar_oid\n")
-	assertLine(t, bufReader, "ext-2-baz sha256:baz_oid\n")
+	assertLine(t, bufReader, "ext-2-baz md5:baz_oid\n")
 	assertLine(t, bufReader, "oid sha256:main_oid\n")
 	assertLine(t, bufReader, "size 12345\n")
 
@@ -87,7 +87,7 @@ func TestDecodeTinyFile(t *testing.T) {
 		t.Errorf("pointer was decoded: %v", p)
 	}
 
-	if !errutil.IsNotAPointerError(err) {
+	if !errors.IsNotAPointerError(err) {
 		t.Errorf("error is not a NotAPointerError: %s: '%v'", reflect.TypeOf(err), err)
 	}
 }

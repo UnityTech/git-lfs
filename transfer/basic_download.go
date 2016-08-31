@@ -1,7 +1,6 @@
 package transfer
 
 import (
-	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -11,7 +10,7 @@ import (
 	"strconv"
 
 	"github.com/github/git-lfs/config"
-	"github.com/github/git-lfs/errutil"
+	"github.com/github/git-lfs/errors"
 	"github.com/github/git-lfs/httputil"
 	"github.com/github/git-lfs/localstorage"
 	"github.com/github/git-lfs/tools"
@@ -110,7 +109,7 @@ func (a *basicDownloadAdapter) download(t *Transfer, cb TransferProgressCallback
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", fromByte, t.Object.Size-1))
 	}
 
-	res, err := httputil.DoHttpRequest(req, true)
+	res, err := httputil.DoHttpRequest(config.Config, req, t.Object.NeedsAuth())
 	if err != nil {
 		// Special-case status code 416 () - fall back
 		if fromByte > 0 && dlFile != nil && res.StatusCode == 416 {
@@ -119,9 +118,9 @@ func (a *basicDownloadAdapter) download(t *Transfer, cb TransferProgressCallback
 			os.Remove(dlFile.Name())
 			return a.download(t, cb, authOkFunc, nil, 0, nil)
 		}
-		return errutil.NewRetriableError(err)
+		return errors.NewRetriableError(err)
 	}
-	httputil.LogTransfer("lfs.data.download", res)
+	httputil.LogTransfer(config.Config, "lfs.data.download", res)
 	defer res.Body.Close()
 
 	// Range request must return 206 & content range to confirm
@@ -178,12 +177,14 @@ func (a *basicDownloadAdapter) download(t *Transfer, cb TransferProgressCallback
 	}
 
 	var hasher *tools.HashingReader
+	httpReader := tools.NewRetriableReader(res.Body)
+
 	if fromByte > 0 && hash != nil {
 		// pre-load hashing reader with previous content
-		hasher = tools.NewHashingReaderPreloadHash(res.Body, hash)
+		hasher = tools.NewHashingReaderPreloadHash(httpReader, hash)
 	} else {
 		newHash := config.OidTypeFromConfig(config.Config).GetHasher()
-		hasher = tools.NewHashingReaderPreloadHash(res.Body, newHash)
+		hasher = tools.NewHashingReaderPreloadHash(httpReader, newHash)
 	}
 
 	if dlFile == nil {
@@ -204,7 +205,7 @@ func (a *basicDownloadAdapter) download(t *Transfer, cb TransferProgressCallback
 	}
 	written, err := tools.CopyWithCallback(dlFile, hasher, res.ContentLength, ccb)
 	if err != nil {
-		return fmt.Errorf("cannot write data to tempfile %q: %v", dlfilename, err)
+		return errors.Wrapf(err, "cannot write data to tempfile %q", dlfilename)
 	}
 	if err := dlFile.Close(); err != nil {
 		return fmt.Errorf("can't close tempfile %q: %v", dlfilename, err)
@@ -215,11 +216,10 @@ func (a *basicDownloadAdapter) download(t *Transfer, cb TransferProgressCallback
 	}
 
 	return tools.RenameFileCopyPermissions(dlfilename, t.Path)
-
 }
 
-func init() {
-	newfunc := func(name string, dir Direction) TransferAdapter {
+func configureBasicDownloadAdapter(m *Manifest) {
+	m.RegisterNewTransferAdapterFunc(BasicAdapterName, Download, func(name string, dir Direction) TransferAdapter {
 		switch dir {
 		case Download:
 			bd := &basicDownloadAdapter{newAdapterBase(name, dir, nil)}
@@ -230,6 +230,5 @@ func init() {
 			panic("Should never ask this func to upload")
 		}
 		return nil
-	}
-	RegisterNewTransferAdapterFunc(BasicAdapterName, Download, newfunc)
+	})
 }

@@ -8,7 +8,8 @@ import (
 	"strconv"
 
 	"github.com/github/git-lfs/api"
-	"github.com/github/git-lfs/errutil"
+	"github.com/github/git-lfs/config"
+	"github.com/github/git-lfs/errors"
 	"github.com/github/git-lfs/httputil"
 	"github.com/github/git-lfs/progress"
 	"github.com/rubyist/tracerx"
@@ -52,9 +53,9 @@ func (a *tusUploadAdapter) DoTransfer(ctx interface{}, t *Transfer, cb TransferP
 		return err
 	}
 	req.Header.Set("Tus-Resumable", TusVersion)
-	res, err := httputil.DoHttpRequest(req, false)
+	res, err := httputil.DoHttpRequest(config.Config, req, false)
 	if err != nil {
-		return errutil.NewRetriableError(err)
+		return errors.NewRetriableError(err)
 	}
 
 	//    Response will contain Upload-Offset if supported
@@ -77,7 +78,7 @@ func (a *tusUploadAdapter) DoTransfer(ctx interface{}, t *Transfer, cb TransferP
 	// Open file for uploading
 	f, err := os.OpenFile(t.Path, os.O_RDONLY, 0644)
 	if err != nil {
-		return errutil.Error(err)
+		return errors.Wrap(err, "tus upload")
 	}
 	defer f.Close()
 
@@ -89,7 +90,7 @@ func (a *tusUploadAdapter) DoTransfer(ctx interface{}, t *Transfer, cb TransferP
 		advanceCallbackProgress(cb, t, offset)
 		_, err := f.Seek(offset, os.SEEK_CUR)
 		if err != nil {
-			return errutil.Error(err)
+			return errors.Wrap(err, "tus upload")
 		}
 	}
 
@@ -133,30 +134,31 @@ func (a *tusUploadAdapter) DoTransfer(ctx interface{}, t *Transfer, cb TransferP
 
 	req.Body = ioutil.NopCloser(reader)
 
-	res, err = httputil.DoHttpRequest(req, false)
+	res, err = httputil.DoHttpRequest(config.Config, req, false)
 	if err != nil {
-		return errutil.NewRetriableError(err)
+		return errors.NewRetriableError(err)
 	}
-	httputil.LogTransfer("lfs.data.upload", res)
+	httputil.LogTransfer(config.Config, "lfs.data.upload", res)
 
 	// A status code of 403 likely means that an authentication token for the
 	// upload has expired. This can be safely retried.
 	if res.StatusCode == 403 {
-		return errutil.NewRetriableError(err)
+		err = errors.New("http: received status 403")
+		return errors.NewRetriableError(err)
 	}
 
 	if res.StatusCode > 299 {
-		return errutil.Errorf(nil, "Invalid status for %s: %d", httputil.TraceHttpReq(req), res.StatusCode)
+		return errors.Wrapf(nil, "Invalid status for %s: %d", httputil.TraceHttpReq(req), res.StatusCode)
 	}
 
 	io.Copy(ioutil.Discard, res.Body)
 	res.Body.Close()
 
-	return api.VerifyUpload(t.Object)
+	return api.VerifyUpload(config.Config, t.Object)
 }
 
-func init() {
-	newfunc := func(name string, dir Direction) TransferAdapter {
+func configureTusAdapter(m *Manifest) {
+	m.RegisterNewTransferAdapterFunc(TusAdapterName, Upload, func(name string, dir Direction) TransferAdapter {
 		switch dir {
 		case Upload:
 			bu := &tusUploadAdapter{newAdapterBase(name, dir, nil)}
@@ -167,6 +169,5 @@ func init() {
 			panic("Should never ask tus.io to download")
 		}
 		return nil
-	}
-	RegisterNewTransferAdapterFunc(TusAdapterName, Upload, newfunc)
+	})
 }

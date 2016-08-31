@@ -21,12 +21,12 @@ type Endpoint struct {
 // NewEndpointFromCloneURL creates an Endpoint from a git clone URL by appending
 // "[.git]/info/lfs".
 func NewEndpointFromCloneURL(url string) Endpoint {
-	return NewEndpointFromCloneURLWithConfig(url, NewConfig())
+	return NewEndpointFromCloneURLWithConfig(url, New())
 }
 
 // NewEndpoint initializes a new Endpoint for a given URL.
 func NewEndpoint(rawurl string) Endpoint {
-	return NewEndpointWithConfig(rawurl, NewConfig())
+	return NewEndpointWithConfig(rawurl, New())
 }
 
 // NewEndpointFromCloneURLWithConfig creates an Endpoint from a git clone URL by appending
@@ -37,17 +37,23 @@ func NewEndpointFromCloneURLWithConfig(url string, c *Configuration) Endpoint {
 		return e
 	}
 
+	if strings.HasSuffix(url, "/") {
+		e.Url = url[0 : len(url)-1]
+	}
+
 	// When using main remote URL for HTTP, append info/lfs
-	if path.Ext(url) == ".git" {
+	if path.Ext(e.Url) == ".git" {
 		e.Url += "/info/lfs"
 	} else {
 		e.Url += ".git/info/lfs"
 	}
+
 	return e
 }
 
 // NewEndpointWithConfig initializes a new Endpoint for a given URL.
 func NewEndpointWithConfig(rawurl string, c *Configuration) Endpoint {
+	rawurl = c.ReplaceUrlAlias(rawurl)
 	u, err := url.Parse(rawurl)
 	if err != nil {
 		return Endpoint{Url: EndpointUrlUnknown}

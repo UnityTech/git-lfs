@@ -7,16 +7,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	envCmd = &cobra.Command{
-		Use: "env",
-		Run: envCommand,
-	}
-)
-
 func envCommand(cmd *cobra.Command, args []string) {
 	config.ShowConfigWarnings = true
-	cfg := config.Config
 	endpoint := cfg.Endpoint("download")
 
 	gitV, err := git.Config.Version()
@@ -43,16 +35,22 @@ func envCommand(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	for _, env := range lfs.Environ() {
+	for _, env := range lfs.Environ(cfg, TransferManifest()) {
 		Print(env)
 	}
 
 	for _, key := range []string{"filter.lfs.smudge", "filter.lfs.clean"} {
-		value, _ := cfg.GitConfig(key)
+		value, _ := cfg.Git.Get(key)
 		Print("git config %s = %q", key, value)
 	}
 }
 
 func init() {
-	RootCmd.AddCommand(envCmd)
+	RegisterSubcommand(func() *cobra.Command {
+		return &cobra.Command{
+			Use:    "env",
+			PreRun: resolveLocalStorage,
+			Run:    envCommand,
+		}
+	})
 }

@@ -7,20 +7,12 @@ import (
 	"os/exec"
 	"sync"
 
-	"github.com/github/git-lfs/config"
-	"github.com/github/git-lfs/errutil"
+	"github.com/github/git-lfs/errors"
 	"github.com/github/git-lfs/git"
 	"github.com/github/git-lfs/lfs"
 	"github.com/github/git-lfs/progress"
 	"github.com/rubyist/tracerx"
 	"github.com/spf13/cobra"
-)
-
-var (
-	checkoutCmd = &cobra.Command{
-		Use: "checkout",
-		Run: checkoutCommand,
-	}
 )
 
 func checkoutCommand(cmd *cobra.Command, args []string) {
@@ -41,10 +33,6 @@ func checkoutCommand(cmd *cobra.Command, args []string) {
 	}
 	close(inchan)
 	checkoutWithIncludeExclude(rootedpaths, nil)
-}
-
-func init() {
-	RootCmd.AddCommand(checkoutCmd)
 }
 
 // Checkout from items reported from the fetch process (in parallel)
@@ -120,7 +108,9 @@ func checkoutWithIncludeExclude(include []string, exclude []string) {
 	for _, pointer := range pointers {
 		totalBytes += pointer.Size
 	}
-	progress := progress.NewProgressMeter(len(pointers), totalBytes, false, config.Config.Getenv("GIT_LFS_PROGRESS"))
+
+	logPath, _ := cfg.Os.Get("GIT_LFS_PROGRESS")
+	progress := progress.NewProgressMeter(len(pointers), totalBytes, false, logPath)
 	progress.Start()
 	totalBytes = 0
 	for _, pointer := range pointers {
@@ -176,12 +166,15 @@ func checkoutWithChan(in <-chan *lfs.WrappedPointer) {
 	// locked state.
 
 	// As files come in, write them to the wd and update the index
+
+	manifest := TransferManifest()
+
 	for pointer := range in {
 
 		// Check the content - either missing or still this pointer (not exist is ok)
 		filepointer, err := lfs.DecodePointerFromFile(pointer.Name)
 		if err != nil && !os.IsNotExist(err) {
-			if errutil.IsNotAPointerError(err) {
+			if errors.IsNotAPointerError(err) {
 				// File has non-pointer content, leave it alone
 				continue
 			}
@@ -198,9 +191,9 @@ func checkoutWithChan(in <-chan *lfs.WrappedPointer) {
 		repopathchan <- pointer.Name
 		cwdfilepath := <-cwdpathchan
 
-		err = lfs.PointerSmudgeToFile(cwdfilepath, pointer.Pointer, false, nil)
+		err = lfs.PointerSmudgeToFile(cwdfilepath, pointer.Pointer, false, manifest, nil)
 		if err != nil {
-			if errutil.IsDownloadDeclinedError(err) {
+			if errors.IsDownloadDeclinedError(err) {
 				// acceptable error, data not local (fetch not run or include/exclude)
 				LoggedError(err, "Skipped checkout for %v, content not local. Use fetch to download.", pointer.Name)
 			} else {
@@ -235,4 +228,14 @@ func checkoutWithChan(in <-chan *lfs.WrappedPointer) {
 			LoggedError(err, "Error updating the git index:\n%s", updateIdxOut.String())
 		}
 	}
+}
+
+func init() {
+	RegisterSubcommand(func() *cobra.Command {
+		return &cobra.Command{
+			Use:    "checkout",
+			Run:    checkoutCommand,
+			PreRun: resolveLocalStorage,
+		}
+	})
 }

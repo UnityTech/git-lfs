@@ -3,17 +3,10 @@ package commands
 import (
 	"os"
 
-	"github.com/github/git-lfs/errutil"
+	"github.com/github/git-lfs/errors"
 	"github.com/github/git-lfs/lfs"
 	"github.com/github/git-lfs/progress"
 	"github.com/spf13/cobra"
-)
-
-var (
-	cleanCmd = &cobra.Command{
-		Use: "clean",
-		Run: cleanCommand,
-	}
 )
 
 func cleanCommand(cmd *cobra.Command, args []string) {
@@ -50,8 +43,8 @@ func cleanCommand(cmd *cobra.Command, args []string) {
 		defer cleaned.Teardown()
 	}
 
-	if errutil.IsCleanPointerError(err) {
-		os.Stdout.Write(errutil.ErrorGetContext(err, "bytes").([]byte))
+	if errors.IsCleanPointerError(err) {
+		os.Stdout.Write(errors.GetContext(err, "bytes").([]byte))
 		return
 	}
 
@@ -82,5 +75,11 @@ func cleanCommand(cmd *cobra.Command, args []string) {
 }
 
 func init() {
-	RootCmd.AddCommand(cleanCmd)
+	RegisterSubcommand(func() *cobra.Command {
+		return &cobra.Command{
+			Use:    "clean",
+			Run:    cleanCommand,
+			PreRun: resolveLocalStorage,
+		}
+	})
 }

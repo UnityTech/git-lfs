@@ -6,7 +6,7 @@ import (
 
 	"github.com/github/git-lfs/api"
 	"github.com/github/git-lfs/config"
-	"github.com/github/git-lfs/errutil"
+	"github.com/github/git-lfs/errors"
 	"github.com/github/git-lfs/git"
 	"github.com/github/git-lfs/progress"
 	"github.com/github/git-lfs/transfer"
@@ -53,20 +53,24 @@ type TransferQueue struct {
 	retrywait         sync.WaitGroup
 	wait              sync.WaitGroup // Incremented on Add(), decremented on transfer complete or skip
 	oldApiWorkers     int            // Number of non-batch API workers to spawn (deprecated)
+	manifest          *transfer.Manifest
 }
 
 // newTransferQueue builds a TransferQueue, direction and underlying mechanism determined by adapter
 func newTransferQueue(files int, size int64, dryRun bool, dir transfer.Direction) *TransferQueue {
+	logPath, _ := config.Config.Os.Get("GIT_LFS_PROGRESS")
+
 	q := &TransferQueue{
 		direction:     dir,
 		dryRun:        dryRun,
-		meter:         progress.NewProgressMeter(files, size, dryRun, config.Config.Getenv("GIT_LFS_PROGRESS")),
+		meter:         progress.NewProgressMeter(files, size, dryRun, logPath),
 		apic:          make(chan Transferable, batchSize),
 		retriesc:      make(chan Transferable, batchSize),
 		errorc:        make(chan error),
 		oldApiWorkers: config.Config.ConcurrentTransfers(),
 		transferables: make(map[string]Transferable),
 		trMutex:       &sync.Mutex{},
+		manifest:      transfer.ConfigureManifest(transfer.NewManifest(), config.Config),
 	}
 
 	q.errorwait.Add(1)
@@ -107,7 +111,7 @@ func (q *TransferQueue) useAdapter(name string) {
 		// changing adapter support in between batches
 		q.finishAdapter()
 	}
-	q.adapter = transfer.NewAdapterOrDefault(name, q.direction)
+	q.adapter = q.manifest.NewAdapterOrDefault(name, q.direction)
 }
 
 func (q *TransferQueue) finishAdapter() {
@@ -119,7 +123,6 @@ func (q *TransferQueue) finishAdapter() {
 }
 
 func (q *TransferQueue) addToAdapter(t Transferable) {
-
 	tr := transfer.NewTransfer(t.Name(), t.Object(), t.Path())
 
 	if q.dryRun {
@@ -330,7 +333,7 @@ func (q *TransferQueue) legacyFallback(failedBatch []interface{}) {
 func (q *TransferQueue) batchApiRoutine() {
 	var startProgress sync.Once
 
-	transferAdapterNames := transfer.GetAdapterNames(q.direction)
+	transferAdapterNames := q.manifest.GetAdapterNames(q.direction)
 
 	for {
 		batch := q.batcher.Next()
@@ -350,9 +353,9 @@ func (q *TransferQueue) batchApiRoutine() {
 			continue
 		}
 
-		objs, adapterName, err := api.Batch(transfers, q.transferKind(), transferAdapterNames)
+		objs, adapterName, err := api.Batch(config.Config, transfers, q.transferKind(), transferAdapterNames)
 		if err != nil {
-			if errutil.IsNotImplementedError(err) {
+			if errors.IsNotImplementedError(err) {
 				git.Config.SetLocal("", "lfs.batch", "false")
 
 				go q.legacyFallback(batch)
@@ -376,7 +379,7 @@ func (q *TransferQueue) batchApiRoutine() {
 
 		for _, o := range objs {
 			if o.Error != nil {
-				q.errorc <- errutil.Errorf(o.Error, "[%v] %v", o.Oid, o.Error.Message)
+				q.errorc <- errors.Wrapf(o.Error, "[%v] %v", o.Oid, o.Error.Message)
 				q.Skip(o.Size)
 				q.wait.Done()
 				continue
@@ -458,7 +461,7 @@ func (q *TransferQueue) retry(t Transferable) {
 }
 
 func (q *TransferQueue) canRetry(err error) bool {
-	if !errutil.IsRetriableError(err) || atomic.LoadUint32(&q.retrying) == 1 {
+	if !errors.IsRetriableError(err) || atomic.LoadUint32(&q.retrying) == 1 {
 		return false
 	}
 

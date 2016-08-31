@@ -18,11 +18,6 @@ import (
 )
 
 var (
-	pruneCmd = &cobra.Command{
-		Use:   "prune",
-		Short: "Deletes old LFS files from the local store",
-		Run:   pruneCommand,
-	}
 	pruneDryRunArg      bool
 	pruneVerboseArg     bool
 	pruneVerifyArg      bool
@@ -30,17 +25,15 @@ var (
 )
 
 func pruneCommand(cmd *cobra.Command, args []string) {
-
 	// Guts of this must be re-usable from fetch --prune so just parse & dispatch
 	if pruneVerifyArg && pruneDoNotVerifyArg {
 		Exit("Cannot specify both --verify-remote and --no-verify-remote")
 	}
 
+	fetchPruneConfig := cfg.FetchPruneConfig()
 	verify := !pruneDoNotVerifyArg &&
-		(config.Config.FetchPruneConfig().PruneVerifyRemoteAlways || pruneVerifyArg)
-
-	prune(verify, pruneDryRunArg, pruneVerboseArg)
-
+		(fetchPruneConfig.PruneVerifyRemoteAlways || pruneVerifyArg)
+	prune(fetchPruneConfig, verify, pruneDryRunArg, pruneVerboseArg)
 }
 
 type PruneProgressType int
@@ -58,7 +51,7 @@ type PruneProgress struct {
 }
 type PruneProgressChan chan PruneProgress
 
-func prune(verifyRemote, dryRun, verbose bool) {
+func prune(fetchPruneConfig config.FetchPruneConfig, verifyRemote, dryRun, verbose bool) {
 	localObjects := make([]localstorage.Object, 0, 100)
 	retainedObjects := tools.NewStringSetWithCapacity(100)
 	var reachableObjects tools.StringSet
@@ -87,8 +80,8 @@ func prune(verifyRemote, dryRun, verbose bool) {
 	// Now find files to be retained from many sources
 	retainChan := make(chan string, 100)
 
-	go pruneTaskGetRetainedCurrentAndRecentRefs(retainChan, errorChan, &taskwait)
-	go pruneTaskGetRetainedUnpushed(retainChan, errorChan, &taskwait)
+	go pruneTaskGetRetainedCurrentAndRecentRefs(fetchPruneConfig, retainChan, errorChan, &taskwait)
+	go pruneTaskGetRetainedUnpushed(fetchPruneConfig, retainChan, errorChan, &taskwait)
 	go pruneTaskGetRetainedWorktree(retainChan, errorChan, &taskwait)
 	if verifyRemote {
 		reachableObjects = tools.NewStringSetWithCapacity(100)
@@ -123,7 +116,7 @@ func prune(verifyRemote, dryRun, verbose bool) {
 	var verifyc chan string
 
 	if verifyRemote {
-		config.Config.CurrentRemote = config.Config.FetchPruneConfig().PruneRemoteName
+		cfg.CurrentRemote = fetchPruneConfig.PruneRemoteName
 		// build queue now, no estimates or progress output
 		verifyQueue = lfs.NewDownloadCheckQueue(0, 0)
 		verifiedObjects = tools.NewStringSetWithCapacity(len(localObjects) / 2)
@@ -350,7 +343,7 @@ func pruneTaskGetPreviousVersionsOfRef(ref string, since time.Time, retainChan c
 }
 
 // Background task, must call waitg.Done() once at end
-func pruneTaskGetRetainedCurrentAndRecentRefs(retainChan chan string, errorChan chan error, waitg *sync.WaitGroup) {
+func pruneTaskGetRetainedCurrentAndRecentRefs(fetchconf config.FetchPruneConfig, retainChan chan string, errorChan chan error, waitg *sync.WaitGroup) {
 	defer waitg.Done()
 
 	// We actually increment the waitg in this func since we kick off sub-goroutines
@@ -367,7 +360,6 @@ func pruneTaskGetRetainedCurrentAndRecentRefs(retainChan chan string, errorChan 
 	go pruneTaskGetRetainedAtRef(ref.Sha, retainChan, errorChan, waitg)
 
 	// Now recent
-	fetchconf := config.Config.FetchPruneConfig()
 	if fetchconf.FetchRecentRefsDays > 0 {
 		pruneRefDays := fetchconf.FetchRecentRefsDays + fetchconf.PruneOffsetDays
 		tracerx.Printf("PRUNE: Retaining non-HEAD refs within %d (%d+%d) days", pruneRefDays, fetchconf.FetchRecentRefsDays, fetchconf.PruneOffsetDays)
@@ -405,10 +397,10 @@ func pruneTaskGetRetainedCurrentAndRecentRefs(retainChan chan string, errorChan 
 }
 
 // Background task, must call waitg.Done() once at end
-func pruneTaskGetRetainedUnpushed(retainChan chan string, errorChan chan error, waitg *sync.WaitGroup) {
+func pruneTaskGetRetainedUnpushed(fetchconf config.FetchPruneConfig, retainChan chan string, errorChan chan error, waitg *sync.WaitGroup) {
 	defer waitg.Done()
 
-	remoteName := config.Config.FetchPruneConfig().PruneRemoteName
+	remoteName := fetchconf.PruneRemoteName
 
 	refchan, err := lfs.ScanUnpushedToChan(remoteName)
 	if err != nil {
@@ -484,9 +476,18 @@ func pruneTaskGetReachableObjects(outObjectSet *tools.StringSet, errorChan chan 
 }
 
 func init() {
-	pruneCmd.Flags().BoolVarP(&pruneDryRunArg, "dry-run", "d", false, "Don't delete anything, just report")
-	pruneCmd.Flags().BoolVarP(&pruneVerboseArg, "verbose", "v", false, "Print full details of what is/would be deleted")
-	pruneCmd.Flags().BoolVarP(&pruneVerifyArg, "verify-remote", "c", false, "Verify that remote has LFS files before deleting")
-	pruneCmd.Flags().BoolVar(&pruneDoNotVerifyArg, "no-verify-remote", false, "Override lfs.pruneverifyremotealways and don't verify")
-	RootCmd.AddCommand(pruneCmd)
+	RegisterSubcommand(func() *cobra.Command {
+		cmd := &cobra.Command{
+			Use:    "prune",
+			Short:  "Deletes old LFS files from the local store",
+			PreRun: resolveLocalStorage,
+			Run:    pruneCommand,
+		}
+
+		cmd.Flags().BoolVarP(&pruneDryRunArg, "dry-run", "d", false, "Don't delete anything, just report")
+		cmd.Flags().BoolVarP(&pruneVerboseArg, "verbose", "v", false, "Print full details of what is/would be deleted")
+		cmd.Flags().BoolVarP(&pruneVerifyArg, "verify-remote", "c", false, "Verify that remote has LFS files before deleting")
+		cmd.Flags().BoolVar(&pruneDoNotVerifyArg, "no-verify-remote", false, "Override lfs.pruneverifyremotealways and don't verify")
+		return cmd
+	})
 }

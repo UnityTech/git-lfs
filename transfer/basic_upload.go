@@ -9,7 +9,8 @@ import (
 	"strconv"
 
 	"github.com/github/git-lfs/api"
-	"github.com/github/git-lfs/errutil"
+	"github.com/github/git-lfs/config"
+	"github.com/github/git-lfs/errors"
 	"github.com/github/git-lfs/httputil"
 	"github.com/github/git-lfs/progress"
 )
@@ -68,7 +69,7 @@ func (a *basicUploadAdapter) DoTransfer(ctx interface{}, t *Transfer, cb Transfe
 
 	f, err := os.OpenFile(t.Path, os.O_RDONLY, 0644)
 	if err != nil {
-		return errutil.Error(err)
+		return errors.Wrap(err, "basic upload")
 	}
 	defer f.Close()
 
@@ -96,26 +97,27 @@ func (a *basicUploadAdapter) DoTransfer(ctx interface{}, t *Transfer, cb Transfe
 
 	req.Body = ioutil.NopCloser(reader)
 
-	res, err := httputil.DoHttpRequest(req, true)
+	res, err := httputil.DoHttpRequest(config.Config, req, t.Object.NeedsAuth())
 	if err != nil {
-		return errutil.NewRetriableError(err)
+		return errors.NewRetriableError(err)
 	}
-	httputil.LogTransfer("lfs.data.upload", res)
+	httputil.LogTransfer(config.Config, "lfs.data.upload", res)
 
 	// A status code of 403 likely means that an authentication token for the
 	// upload has expired. This can be safely retried.
 	if res.StatusCode == 403 {
-		return errutil.NewRetriableError(err)
+		err = errors.New("http: received status 403")
+		return errors.NewRetriableError(err)
 	}
 
 	if res.StatusCode > 299 {
-		return errutil.Errorf(nil, "Invalid status for %s: %d", httputil.TraceHttpReq(req), res.StatusCode)
+		return errors.Wrapf(nil, "Invalid status for %s: %d", httputil.TraceHttpReq(req), res.StatusCode)
 	}
 
 	io.Copy(ioutil.Discard, res.Body)
 	res.Body.Close()
 
-	return api.VerifyUpload(t.Object)
+	return api.VerifyUpload(config.Config, t.Object)
 }
 
 // startCallbackReader is a reader wrapper which calls a function as soon as the
@@ -137,8 +139,8 @@ func newStartCallbackReader(r io.Reader, cb func(*startCallbackReader)) *startCa
 	return &startCallbackReader{r, cb, false}
 }
 
-func init() {
-	newfunc := func(name string, dir Direction) TransferAdapter {
+func configureBasicUploadAdapter(m *Manifest) {
+	m.RegisterNewTransferAdapterFunc(BasicAdapterName, Upload, func(name string, dir Direction) TransferAdapter {
 		switch dir {
 		case Upload:
 			bu := &basicUploadAdapter{newAdapterBase(name, dir, nil)}
@@ -149,6 +151,5 @@ func init() {
 			panic("Should never ask this func for basic download")
 		}
 		return nil
-	}
-	RegisterNewTransferAdapterFunc(BasicAdapterName, Upload, newfunc)
+	})
 }

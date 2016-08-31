@@ -3,21 +3,12 @@ package commands
 import (
 	"fmt"
 
-	"github.com/github/git-lfs/config"
 	"github.com/github/git-lfs/git"
 	"github.com/spf13/cobra"
 )
 
-var (
-	pullCmd = &cobra.Command{
-		Use: "pull",
-		Run: pullCommand,
-	}
-	pullIncludeArg string
-	pullExcludeArg string
-)
-
 func pullCommand(cmd *cobra.Command, args []string) {
+	requireGitVersion()
 	requireInRepo()
 
 	if len(args) > 0 {
@@ -25,17 +16,18 @@ func pullCommand(cmd *cobra.Command, args []string) {
 		if err := git.ValidateRemote(args[0]); err != nil {
 			Panic(err, fmt.Sprintf("Invalid remote name '%v'", args[0]))
 		}
-		config.Config.CurrentRemote = args[0]
+		cfg.CurrentRemote = args[0]
 	} else {
 		// Actively find the default remote, don't just assume origin
 		defaultRemote, err := git.DefaultRemote()
 		if err != nil {
 			Panic(err, "No default remote")
 		}
-		config.Config.CurrentRemote = defaultRemote
+		cfg.CurrentRemote = defaultRemote
 	}
 
-	pull(determineIncludeExcludePaths(config.Config, pullIncludeArg, pullExcludeArg))
+	includeArg, excludeArg := getIncludeExcludeArgs(cmd)
+	pull(determineIncludeExcludePaths(cfg, includeArg, excludeArg))
 
 }
 
@@ -52,7 +44,15 @@ func pull(includePaths, excludePaths []string) {
 }
 
 func init() {
-	pullCmd.Flags().StringVarP(&pullIncludeArg, "include", "I", "", "Include a list of paths")
-	pullCmd.Flags().StringVarP(&pullExcludeArg, "exclude", "X", "", "Exclude a list of paths")
-	RootCmd.AddCommand(pullCmd)
+	RegisterSubcommand(func() *cobra.Command {
+		cmd := &cobra.Command{
+			Use:    "pull",
+			PreRun: resolveLocalStorage,
+			Run:    pullCommand,
+		}
+
+		cmd.Flags().StringVarP(&includeArg, "include", "I", "", "Include a list of paths")
+		cmd.Flags().StringVarP(&excludeArg, "exclude", "X", "", "Exclude a list of paths")
+		return cmd
+	})
 }

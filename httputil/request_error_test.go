@@ -7,21 +7,25 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 
-	"github.com/github/git-lfs/errutil"
+	"github.com/github/git-lfs/config"
+	"github.com/github/git-lfs/errors"
 )
 
 func TestSuccessStatus(t *testing.T) {
+	cfg := config.New()
 	for _, status := range []int{200, 201, 202} {
 		res := &http.Response{StatusCode: status}
-		if err := handleResponse(res, nil); err != nil {
+		if err := handleResponse(cfg, res, nil); err != nil {
 			t.Errorf("Unexpected error for HTTP %d: %s", status, err.Error())
 		}
 	}
 }
 
 func TestErrorStatusWithCustomMessage(t *testing.T) {
+	cfg := config.New()
 	u, err := url.Parse("https://lfs-server.com/objects/oid")
 	if err != nil {
 		t.Fatal(err)
@@ -39,6 +43,7 @@ func TestErrorStatusWithCustomMessage(t *testing.T) {
 		501: "not panic",
 		503: "panic",
 		504: "panic",
+		507: "not panic",
 		509: "not panic",
 	}
 
@@ -61,19 +66,19 @@ func TestErrorStatusWithCustomMessage(t *testing.T) {
 		}
 		res.Header.Set("Content-Type", "application/vnd.git-lfs+json; charset=utf-8")
 
-		err = handleResponse(res, nil)
+		err = handleResponse(cfg, res, nil)
 		if err == nil {
 			t.Errorf("No error from HTTP %d", status)
 			continue
 		}
 
 		expected := fmt.Sprintf("custom error for %d", status)
-		if actual := err.Error(); actual != expected {
+		if actual := err.Error(); !strings.HasSuffix(actual, expected) {
 			t.Errorf("Expected for HTTP %d:\n%s\nACTUAL:\n%s", status, expected, actual)
 			continue
 		}
 
-		if errutil.IsFatalError(err) == (panicMsg != "panic") {
+		if errors.IsFatalError(err) == (panicMsg != "panic") {
 			t.Errorf("Error for HTTP %d should %s", status, panicMsg)
 			continue
 		}
@@ -81,6 +86,7 @@ func TestErrorStatusWithCustomMessage(t *testing.T) {
 }
 
 func TestErrorStatusWithDefaultMessage(t *testing.T) {
+	cfg := config.New()
 	rawurl := "https://lfs-server.com/objects/oid"
 	u, err := url.Parse(rawurl)
 	if err != nil {
@@ -94,12 +100,13 @@ func TestErrorStatusWithDefaultMessage(t *testing.T) {
 		404: {defaultErrors[404], "not panic"},
 		405: {defaultErrors[400] + " from HTTP 405", "not panic"},
 		406: {defaultErrors[400] + " from HTTP 406", "not panic"},
-		429: {defaultErrors[400] + " from HTTP 429", "not panic"},
+		429: {defaultErrors[429], "not panic"},
 		500: {defaultErrors[500], "panic"},
 		501: {defaultErrors[500] + " from HTTP 501", "not panic"},
 		503: {defaultErrors[500] + " from HTTP 503", "panic"},
 		504: {defaultErrors[500] + " from HTTP 504", "panic"},
-		509: {defaultErrors[500] + " from HTTP 509", "not panic"},
+		507: {defaultErrors[507], "not panic"},
+		509: {defaultErrors[509], "not panic"},
 	}
 
 	for status, results := range statuses {
@@ -123,20 +130,19 @@ func TestErrorStatusWithDefaultMessage(t *testing.T) {
 		// purposely wrong content type so it falls back to default
 		res.Header.Set("Content-Type", "application/vnd.git-lfs+json2")
 
-		err = handleResponse(res, nil)
+		err = handleResponse(cfg, res, nil)
 		if err == nil {
 			t.Errorf("No error from HTTP %d", status)
 			continue
 		}
 
 		expected := fmt.Sprintf(results[0], rawurl)
-
-		if actual := err.Error(); actual != expected {
+		if actual := err.Error(); !strings.HasSuffix(actual, expected) {
 			t.Errorf("Expected for HTTP %d:\n%s\nACTUAL:\n%s", status, expected, actual)
 			continue
 		}
 
-		if errutil.IsFatalError(err) == (results[1] != "panic") {
+		if errors.IsFatalError(err) == (results[1] != "panic") {
 			t.Errorf("Error for HTTP %d should %s", status, results[1])
 			continue
 		}

@@ -7,19 +7,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	extCmd = &cobra.Command{
-		Use: "ext",
-		Run: extCommand,
-	}
-
-	extListCmd = &cobra.Command{
-		Use:   "list",
-		Short: "View details for specified extensions",
-		Run:   extListCommand,
-	}
-)
-
 func extCommand(cmd *cobra.Command, args []string) {
 	printAllExts()
 }
@@ -31,7 +18,6 @@ func extListCommand(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	cfg := config.Config
 	for _, key := range args {
 		ext := cfg.Extensions()[key]
 		printExt(ext)
@@ -39,8 +25,6 @@ func extListCommand(cmd *cobra.Command, args []string) {
 }
 
 func printAllExts() {
-	cfg := config.Config
-
 	extensions, err := cfg.SortedExtensions()
 	if err != nil {
 		fmt.Println(err)
@@ -59,6 +43,19 @@ func printExt(ext config.Extension) {
 }
 
 func init() {
-	extCmd.AddCommand(extListCmd)
-	RootCmd.AddCommand(extCmd)
+	RegisterSubcommand(func() *cobra.Command {
+		cmd := &cobra.Command{
+			Use:    "ext",
+			PreRun: resolveLocalStorage,
+			Run:    extCommand,
+		}
+
+		cmd.AddCommand(&cobra.Command{
+			Use:    "list",
+			Short:  "View details for specified extensions",
+			PreRun: resolveLocalStorage,
+			Run:    extListCommand,
+		})
+		return cmd
+	})
 }

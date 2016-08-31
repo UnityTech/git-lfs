@@ -10,7 +10,7 @@ import (
 
 	"github.com/github/git-lfs/auth"
 	"github.com/github/git-lfs/config"
-	"github.com/github/git-lfs/errutil"
+	"github.com/github/git-lfs/errors"
 
 	"github.com/rubyist/tracerx"
 )
@@ -43,16 +43,19 @@ func (e *ClientError) Error() string {
 }
 
 // Internal http request management
-func doHttpRequest(req *http.Request, creds auth.Creds) (*http.Response, error) {
+func doHttpRequest(cfg *config.Configuration, req *http.Request, creds auth.Creds) (*http.Response, error) {
 	var (
-		res *http.Response
-		err error
+		res   *http.Response
+		cause string
+		err   error
 	)
 
-	if config.Config.NtlmAccess(auth.GetOperationForRequest(req)) {
-		res, err = doNTLMRequest(req, true)
+	if cfg.NtlmAccess(auth.GetOperationForRequest(req)) {
+		cause = "ntlm"
+		res, err = doNTLMRequest(cfg, req, true)
 	} else {
-		res, err = NewHttpClient(config.Config, req.Host).Do(req)
+		cause = "http"
+		res, err = NewHttpClient(cfg, req.Host).Do(req)
 	}
 
 	if res == nil {
@@ -65,21 +68,21 @@ func doHttpRequest(req *http.Request, creds auth.Creds) (*http.Response, error) 
 	}
 
 	if err != nil {
-		if errutil.IsAuthError(err) {
-			SetAuthType(req, res)
-			doHttpRequest(req, creds)
+		if errors.IsAuthError(err) {
+			SetAuthType(cfg, req, res)
+			doHttpRequest(cfg, req, creds)
 		} else {
-			err = errutil.Error(err)
+			err = errors.Wrap(err, cause)
 		}
 	} else {
-		err = handleResponse(res, creds)
+		err = handleResponse(cfg, res, creds)
 	}
 
 	if err != nil {
 		if res != nil {
-			SetErrorResponseContext(err, res)
+			SetErrorResponseContext(cfg, err, res)
 		} else {
-			setErrorRequestContext(err, req)
+			setErrorRequestContext(cfg, err, req)
 		}
 	}
 
@@ -87,31 +90,31 @@ func doHttpRequest(req *http.Request, creds auth.Creds) (*http.Response, error) 
 }
 
 // DoHttpRequest performs a single HTTP request
-func DoHttpRequest(req *http.Request, useCreds bool) (*http.Response, error) {
+func DoHttpRequest(cfg *config.Configuration, req *http.Request, useCreds bool) (*http.Response, error) {
 	var creds auth.Creds
 	if useCreds {
-		c, err := auth.GetCreds(req)
+		c, err := auth.GetCreds(cfg, req)
 		if err != nil {
 			return nil, err
 		}
 		creds = c
 	}
 
-	return doHttpRequest(req, creds)
+	return doHttpRequest(cfg, req, creds)
 }
 
 // DoHttpRequestWithRedirects runs a HTTP request and responds to redirects
-func DoHttpRequestWithRedirects(req *http.Request, via []*http.Request, useCreds bool) (*http.Response, error) {
+func DoHttpRequestWithRedirects(cfg *config.Configuration, req *http.Request, via []*http.Request, useCreds bool) (*http.Response, error) {
 	var creds auth.Creds
 	if useCreds {
-		c, err := auth.GetCreds(req)
+		c, err := auth.GetCreds(cfg, req)
 		if err != nil {
 			return nil, err
 		}
 		creds = c
 	}
 
-	res, err := doHttpRequest(req, creds)
+	res, err := doHttpRequest(cfg, req, creds)
 	if err != nil {
 		return res, err
 	}
@@ -126,7 +129,7 @@ func DoHttpRequestWithRedirects(req *http.Request, via []*http.Request, useCreds
 
 		redirectedReq, err := NewHttpRequest(req.Method, redirectTo, nil)
 		if err != nil {
-			return res, errutil.Errorf(err, err.Error())
+			return res, errors.Wrapf(err, err.Error())
 		}
 
 		via = append(via, req)
@@ -139,20 +142,20 @@ func DoHttpRequestWithRedirects(req *http.Request, via []*http.Request, useCreds
 
 		seeker, ok := realBody.(io.Seeker)
 		if !ok {
-			return res, errutil.Errorf(nil, "Request body needs to be an io.Seeker to handle redirects.")
+			return res, errors.Wrapf(nil, "Request body needs to be an io.Seeker to handle redirects.")
 		}
 
 		if _, err := seeker.Seek(0, 0); err != nil {
-			return res, errutil.Error(err)
+			return res, errors.Wrap(err, "request retry")
 		}
 		redirectedReq.Body = realBody
 		redirectedReq.ContentLength = req.ContentLength
 
 		if err = CheckRedirect(redirectedReq, via); err != nil {
-			return res, errutil.Errorf(err, err.Error())
+			return res, errors.Wrapf(err, err.Error())
 		}
 
-		return DoHttpRequestWithRedirects(redirectedReq, via, useCreds)
+		return DoHttpRequestWithRedirects(cfg, redirectedReq, via, useCreds)
 	}
 
 	return res, nil
@@ -174,15 +177,14 @@ func NewHttpRequest(method, rawurl string, header map[string]string) (*http.Requ
 	return req, nil
 }
 
-func SetAuthType(req *http.Request, res *http.Response) {
+func SetAuthType(cfg *config.Configuration, req *http.Request, res *http.Response) {
 	authType := GetAuthType(res)
 	operation := auth.GetOperationForRequest(req)
-	config.Config.SetAccess(operation, authType)
+	cfg.SetAccess(operation, authType)
 	tracerx.Printf("api: http response indicates %q authentication. Resubmitting...", authType)
 }
 
 func GetAuthType(res *http.Response) string {
-
 	for _, headerName := range authenticateHeaders {
 		for _, auth := range res.Header[headerName] {
 

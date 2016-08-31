@@ -16,7 +16,7 @@ import (
 	"github.com/github/git-lfs/api"
 	"github.com/github/git-lfs/auth"
 	"github.com/github/git-lfs/config"
-	"github.com/github/git-lfs/errutil"
+	"github.com/github/git-lfs/errors"
 	"github.com/github/git-lfs/httputil"
 )
 
@@ -73,11 +73,14 @@ func TestSuccessfulDownload(t *testing.T) {
 		w.Write(by)
 	})
 
-	defer config.Config.ResetConfig()
-	config.Config.SetConfig("lfs.batch", "false")
-	config.Config.SetConfig("lfs.url", server.URL+"/media")
+	cfg := config.NewFrom(config.Values{
+		Git: map[string]string{
+			"lfs.batch": "false",
+			"lfs.url":   server.URL + "/media",
+		},
+	})
 
-	obj, _, err := api.BatchOrLegacySingle(&api.ObjectResource{Oid: "oid"}, "download", []string{"basic"})
+	obj, _, err := api.BatchOrLegacySingle(cfg, &api.ObjectResource{Oid: "oid"}, "download", []string{"basic"})
 	if err != nil {
 		if isDockerConnectionError(err) {
 			return
@@ -179,12 +182,15 @@ func TestSuccessfulDownloadWithRedirects(t *testing.T) {
 		w.Write(by)
 	})
 
-	defer config.Config.ResetConfig()
-	config.Config.SetConfig("lfs.batch", "false")
-	config.Config.SetConfig("lfs.url", server.URL+"/redirect")
+	cfg := config.NewFrom(config.Values{
+		Git: map[string]string{
+			"lfs.batch": "false",
+			"lfs.url":   server.URL + "/redirect",
+		},
+	})
 
 	for _, redirect := range redirectCodes {
-		obj, _, err := api.BatchOrLegacySingle(&api.ObjectResource{Oid: "oid"}, "download", []string{"basic"})
+		obj, _, err := api.BatchOrLegacySingle(cfg, &api.ObjectResource{Oid: "oid"}, "download", []string{"basic"})
 		if err != nil {
 			if isDockerConnectionError(err) {
 				return
@@ -257,10 +263,14 @@ func TestSuccessfulDownloadWithAuthorization(t *testing.T) {
 		w.Write(by)
 	})
 
-	defer config.Config.ResetConfig()
-	config.Config.SetConfig("lfs.batch", "false")
-	config.Config.SetConfig("lfs.url", server.URL+"/media")
-	obj, _, err := api.BatchOrLegacySingle(&api.ObjectResource{Oid: "oid"}, "download", []string{"basic"})
+	cfg := config.NewFrom(config.Values{
+		Git: map[string]string{
+			"lfs.batch": "false",
+			"lfs.url":   server.URL + "/media",
+		},
+	})
+
+	obj, _, err := api.BatchOrLegacySingle(cfg, &api.ObjectResource{Oid: "oid"}, "download", []string{"basic"})
 	if err != nil {
 		if isDockerConnectionError(err) {
 			return
@@ -291,15 +301,19 @@ func TestDownloadAPIError(t *testing.T) {
 		w.WriteHeader(404)
 	})
 
-	defer config.Config.ResetConfig()
-	config.Config.SetConfig("lfs.batch", "false")
-	config.Config.SetConfig("lfs.url", server.URL+"/media")
-	_, _, err := api.BatchOrLegacySingle(&api.ObjectResource{Oid: "oid"}, "download", []string{"basic"})
+	cfg := config.NewFrom(config.Values{
+		Git: map[string]string{
+			"lfs.batch": "false",
+			"lfs.url":   server.URL + "/media",
+		},
+	})
+
+	_, _, err := api.BatchOrLegacySingle(cfg, &api.ObjectResource{Oid: "oid"}, "download", []string{"basic"})
 	if err == nil {
 		t.Fatal("no error?")
 	}
 
-	if errutil.IsFatalError(err) {
+	if errors.IsFatalError(err) {
 		t.Fatal("should not panic")
 	}
 
@@ -307,8 +321,9 @@ func TestDownloadAPIError(t *testing.T) {
 		return
 	}
 
-	if err.Error() != fmt.Sprintf(httputil.GetDefaultError(404), server.URL+"/media/objects/oid") {
-		t.Fatalf("Unexpected error: %s", err.Error())
+	expected := fmt.Sprintf(httputil.GetDefaultError(404), server.URL+"/media/objects/oid")
+	if err.Error() != expected {
+		t.Fatalf("Expected: %s\nGot: %s", expected, err.Error())
 	}
 
 }
@@ -353,7 +368,7 @@ var (
 )
 
 func init() {
-	TestCredentialsFunc = func(input auth.Creds, subCommand string) (auth.Creds, error) {
+	TestCredentialsFunc = func(cfg *config.Configuration, input auth.Creds, subCommand string) (auth.Creds, error) {
 		output := make(auth.Creds)
 		for key, value := range input {
 			output[key] = value

@@ -6,8 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/github/git-lfs/config"
-	"github.com/github/git-lfs/errutil"
+	"github.com/github/git-lfs/errors"
 	"github.com/github/git-lfs/lfs"
 	"github.com/spf13/cobra"
 )
@@ -15,10 +14,6 @@ import (
 var (
 	smudgeInfo = false
 	smudgeSkip = false
-	smudgeCmd  = &cobra.Command{
-		Use: "smudge",
-		Run: smudgeCommand,
-	}
 )
 
 func smudgeCommand(cmd *cobra.Command, args []string) {
@@ -31,6 +26,7 @@ func smudgeCommand(cmd *cobra.Command, args []string) {
 
 	ptr, err := lfs.DecodePointer(r)
 	if err != nil {
+		Exit(err.Error())
 		mr := io.MultiReader(b, os.Stdin)
 		_, err := io.Copy(os.Stdout, mr)
 		if err != nil {
@@ -62,14 +58,13 @@ func smudgeCommand(cmd *cobra.Command, args []string) {
 		Error(err.Error())
 	}
 
-	cfg := config.Config
 	download := lfs.FilenamePassesIncludeExcludeFilter(filename, cfg.FetchIncludePaths(), cfg.FetchExcludePaths())
 
-	if smudgeSkip || cfg.GetenvBool("GIT_LFS_SKIP_SMUDGE", false) {
+	if smudgeSkip || cfg.Os.Bool("GIT_LFS_SKIP_SMUDGE", false) {
 		download = false
 	}
 
-	err = ptr.Smudge(os.Stdout, filename, download, cb)
+	err = ptr.Smudge(os.Stdout, filename, download, TransferManifest(), cb)
 	if file != nil {
 		file.Close()
 	}
@@ -77,7 +72,7 @@ func smudgeCommand(cmd *cobra.Command, args []string) {
 	if err != nil {
 		ptr.Encode(os.Stdout)
 		// Download declined error is ok to skip if we weren't requesting download
-		if !(errutil.IsDownloadDeclinedError(err) && !download) {
+		if !(errors.IsDownloadDeclinedError(err) && !download) {
 			LoggedError(err, "Error downloading object: %s (%s)", filename, ptr.Oid)
 			if !cfg.SkipDownloadErrors() {
 				os.Exit(2)
@@ -91,16 +86,23 @@ func smudgeFilename(args []string, err error) string {
 		return args[0]
 	}
 
-	if errutil.IsSmudgeError(err) {
-		return filepath.Base(errutil.ErrorGetContext(err, "FileName").(string))
+	if errors.IsSmudgeError(err) {
+		return filepath.Base(errors.GetContext(err, "FileName").(string))
 	}
 
 	return "<unknown file>"
 }
 
 func init() {
-	// update man page
-	smudgeCmd.Flags().BoolVarP(&smudgeInfo, "info", "i", false, "")
-	smudgeCmd.Flags().BoolVarP(&smudgeSkip, "skip", "s", false, "")
-	RootCmd.AddCommand(smudgeCmd)
+	RegisterSubcommand(func() *cobra.Command {
+		cmd := &cobra.Command{
+			Use:    "smudge",
+			PreRun: resolveLocalStorage,
+			Run:    smudgeCommand,
+		}
+
+		cmd.Flags().BoolVarP(&smudgeInfo, "info", "i", false, "")
+		cmd.Flags().BoolVarP(&smudgeSkip, "skip", "s", false, "")
+		return cmd
+	})
 }

@@ -5,17 +5,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/github/git-lfs/config"
 	"github.com/github/git-lfs/git"
 	"github.com/github/git-lfs/lfs"
 	"github.com/spf13/cobra"
 )
 
 var (
-	prePushCmd = &cobra.Command{
-		Use: "pre-push",
-		Run: prePushCommand,
-	}
 	prePushDryRun       = false
 	prePushDeleteBranch = strings.Repeat("0", 40)
 )
@@ -48,17 +43,19 @@ func prePushCommand(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	requireGitVersion()
+
 	// Remote is first arg
 	if err := git.ValidateRemote(args[0]); err != nil {
 		Exit("Invalid remote name %q", args[0])
 	}
 
-	config.Config.CurrentRemote = args[0]
+	cfg.CurrentRemote = args[0]
 	ctx := newUploadContext(prePushDryRun)
 
 	scanOpt := lfs.NewScanRefsOptions()
 	scanOpt.ScanMode = lfs.ScanLeftToRemoteMode
-	scanOpt.RemoteName = config.Config.CurrentRemote
+	scanOpt.RemoteName = cfg.CurrentRemote
 
 	// We can be passed multiple lines of refs
 	scanner := bufio.NewScanner(os.Stdin)
@@ -101,6 +98,14 @@ func decodeRefs(input string) (string, string) {
 }
 
 func init() {
-	prePushCmd.Flags().BoolVarP(&prePushDryRun, "dry-run", "d", false, "Do everything except actually send the updates")
-	RootCmd.AddCommand(prePushCmd)
+	RegisterSubcommand(func() *cobra.Command {
+		cmd := &cobra.Command{
+			Use:    "pre-push",
+			PreRun: resolveLocalStorage,
+			Run:    prePushCommand,
+		}
+
+		cmd.Flags().BoolVarP(&prePushDryRun, "dry-run", "d", false, "Do everything except actually send the updates")
+		return cmd
+	})
 }

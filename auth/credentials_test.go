@@ -14,6 +14,7 @@ import (
 
 func TestGetCredentialsForApi(t *testing.T) {
 	SetupTestCredentialsFunc()
+	defer RestoreCredentialsFunc()
 
 	checkGetCredentials(t, GetCreds, []*getCredentialCheck{
 		{
@@ -113,8 +114,6 @@ func TestGetCredentialsForApi(t *testing.T) {
 			SkipAuth: true,
 		},
 	})
-
-	RestoreCredentialsFunc()
 }
 
 type fakeNetrc struct{}
@@ -128,8 +127,10 @@ func (n *fakeNetrc) FindMachine(host string) *netrc.Machine {
 
 func TestNetrcWithHostAndPort(t *testing.T) {
 	SetupTestCredentialsFunc()
+	defer RestoreCredentialsFunc()
 
-	config.Config.SetNetrc(&fakeNetrc{})
+	cfg := config.New()
+	cfg.SetNetrc(&fakeNetrc{})
 	u, err := url.Parse("http://some-host:123/foo/bar")
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +141,7 @@ func TestNetrcWithHostAndPort(t *testing.T) {
 		Header: http.Header{},
 	}
 
-	if !setCredURLFromNetrc(req) {
+	if !setCredURLFromNetrc(cfg, req) {
 		t.Fatal("no netrc match")
 	}
 
@@ -148,14 +149,14 @@ func TestNetrcWithHostAndPort(t *testing.T) {
 	if auth != "Basic YWJjOmRlZg==" {
 		t.Fatalf("bad basic auth: %q", auth)
 	}
-
-	RestoreCredentialsFunc()
 }
 
 func TestNetrcWithHost(t *testing.T) {
 	SetupTestCredentialsFunc()
+	defer RestoreCredentialsFunc()
 
-	config.Config.SetNetrc(&fakeNetrc{})
+	cfg := config.New()
+	cfg.SetNetrc(&fakeNetrc{})
 	u, err := url.Parse("http://some-host/foo/bar")
 	if err != nil {
 		t.Fatal(err)
@@ -166,7 +167,7 @@ func TestNetrcWithHost(t *testing.T) {
 		Header: http.Header{},
 	}
 
-	if !setCredURLFromNetrc(req) {
+	if !setCredURLFromNetrc(cfg, req) {
 		t.Fatalf("no netrc match")
 	}
 
@@ -174,14 +175,14 @@ func TestNetrcWithHost(t *testing.T) {
 	if auth != "Basic YWJjOmRlZg==" {
 		t.Fatalf("bad basic auth: %q", auth)
 	}
-
-	RestoreCredentialsFunc()
 }
 
 func TestNetrcWithBadHost(t *testing.T) {
 	SetupTestCredentialsFunc()
+	defer RestoreCredentialsFunc()
 
-	config.Config.SetNetrc(&fakeNetrc{})
+	cfg := config.New()
+	cfg.SetNetrc(&fakeNetrc{})
 	u, err := url.Parse("http://other-host/foo/bar")
 	if err != nil {
 		t.Fatal(err)
@@ -192,7 +193,7 @@ func TestNetrcWithBadHost(t *testing.T) {
 		Header: http.Header{},
 	}
 
-	if setCredURLFromNetrc(req) {
+	if setCredURLFromNetrc(cfg, req) {
 		t.Fatalf("unexpected netrc match")
 	}
 
@@ -200,19 +201,15 @@ func TestNetrcWithBadHost(t *testing.T) {
 	if auth != "" {
 		t.Fatalf("bad basic auth: %q", auth)
 	}
-
-	RestoreCredentialsFunc()
 }
 
-func checkGetCredentials(t *testing.T, getCredsFunc func(*http.Request) (Creds, error), checks []*getCredentialCheck) {
-	existingRemote := config.Config.CurrentRemote
+func checkGetCredentials(t *testing.T, getCredsFunc func(*config.Configuration, *http.Request) (Creds, error), checks []*getCredentialCheck) {
 	for _, check := range checks {
 		t.Logf("Checking %q", check.Desc)
-		config.Config.CurrentRemote = check.CurrentRemote
-
-		for key, value := range check.Config {
-			config.Config.SetConfig(key, value)
-		}
+		cfg := config.NewFrom(config.Values{
+			Git: check.Config,
+		})
+		cfg.CurrentRemote = check.CurrentRemote
 
 		req, err := http.NewRequest(check.Method, check.Href, nil)
 		if err != nil {
@@ -224,7 +221,7 @@ func checkGetCredentials(t *testing.T, getCredsFunc func(*http.Request) (Creds, 
 			req.Header.Set(key, value)
 		}
 
-		creds, err := getCredsFunc(req)
+		creds, err := getCredsFunc(cfg, req)
 		if err != nil {
 			t.Errorf("[%s] %s", check.Desc, err)
 			continue
@@ -275,9 +272,6 @@ func checkGetCredentials(t *testing.T, getCredsFunc func(*http.Request) (Creds, 
 				t.Errorf("[%s] Bad Authorization. Expected '%s', got '%s'", check.Desc, expected, reqAuth)
 			}
 		}
-
-		config.Config.ResetConfig()
-		config.Config.CurrentRemote = existingRemote
 	}
 }
 
@@ -308,7 +302,7 @@ var (
 )
 
 func init() {
-	TestCredentialsFunc = func(input Creds, subCommand string) (Creds, error) {
+	TestCredentialsFunc = func(cfg *config.Configuration, input Creds, subCommand string) (Creds, error) {
 		output := make(Creds)
 		for key, value := range input {
 			output[key] = value

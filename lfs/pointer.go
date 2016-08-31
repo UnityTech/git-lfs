@@ -3,7 +3,6 @@ package lfs
 import (
 	"bufio"
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,8 +12,9 @@ import (
 	"strings"
 
 	"github.com/github/git-lfs/config"
-	"github.com/github/git-lfs/errutil"
+	"github.com/github/git-lfs/errors"
 	"github.com/github/git-lfs/progress"
+	"github.com/github/git-lfs/transfer"
 )
 
 var (
@@ -59,8 +59,8 @@ func NewPointerExtension(name string, priority int, oid string, oidType *config.
 	return &PointerExtension{name, priority, oid, oidType}
 }
 
-func (p *Pointer) Smudge(writer io.Writer, workingfile string, download bool, cb progress.CopyCallback) error {
-	return PointerSmudge(writer, p, workingfile, download, cb)
+func (p *Pointer) Smudge(writer io.Writer, workingfile string, download bool, manifest *transfer.Manifest, cb progress.CopyCallback) error {
+	return PointerSmudge(writer, p, workingfile, download, manifest, cb)
 }
 
 func (p *Pointer) Encode(writer io.Writer) (int, error) {
@@ -96,7 +96,7 @@ func DecodePointerFromFile(file string) (*Pointer, error) {
 		return nil, err
 	}
 	if stat.Size() > blobSizeCutoff {
-		return nil, errutil.NewNotAPointerError(nil)
+		return nil, errors.NewNotAPointerError(errors.New("file size exceeds lfs pointer size cutoff"))
 	}
 	f, err := os.OpenFile(file, os.O_RDONLY, 0644)
 	if err != nil {
@@ -125,7 +125,7 @@ func DecodeFrom(reader io.Reader) ([]byte, *Pointer, error) {
 
 func verifyVersion(version string) error {
 	if len(version) == 0 {
-		return errutil.NewNotAPointerError(errors.New("Missing version"))
+		return errors.NewNotAPointerError(errors.New("Missing version"))
 	}
 
 	for _, v := range v1Aliases {
@@ -140,8 +140,8 @@ func verifyVersion(version string) error {
 func decodeKV(data []byte) (*Pointer, error) {
 	kvps, exts, err := decodeKVData(data)
 	if err != nil {
-		if errutil.IsBadPointerKeyError(err) {
-			return nil, errutil.StandardizeBadPointerError(err)
+		if errors.IsBadPointerKeyError(err) {
+			return nil, errors.StandardizeBadPointerError(err)
 		}
 		return nil, err
 	}
@@ -194,11 +194,11 @@ func parseOid(value string) (string, *config.OidType, error) {
 
 	expected := config.OidTypeFromConfig(config.Config)
 
-	if !expected.Validator.Match([]byte(oid)) {
-		return "", nil, errors.New("Invalid Oid: " + oid)
-	}
 	if oid_type != expected.Name {
 		return "", nil, fmt.Errorf("This repository uses %s instead got %s for object %s", expected.Name, oid_type, oid)
+	}
+	if !expected.Validator.Match([]byte(oid)) {
+		return "", nil, errors.New("Invalid Oid: " + oid)
 	}
 
 	return oid, expected, nil
@@ -240,7 +240,7 @@ func decodeKVData(data []byte) (kvps map[string]string, exts map[string]string, 
 	kvps = make(map[string]string)
 
 	if !matcherRE.Match(data) {
-		err = errutil.NewNotAPointerError(err)
+		err = errors.NewNotAPointerError(errors.New("invalid header"))
 		return
 	}
 
@@ -269,7 +269,7 @@ func decodeKVData(data []byte) (kvps map[string]string, exts map[string]string, 
 
 		if expected := pointerKeys[line]; key != expected {
 			if !extRE.Match([]byte(key)) {
-				err = errutil.NewBadPointerKeyError(expected, key)
+				err = errors.NewBadPointerKeyError(expected, key)
 				return
 			}
 			if exts == nil {

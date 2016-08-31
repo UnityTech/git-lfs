@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/github/git-lfs/config"
 	"github.com/github/git-lfs/git"
 	"github.com/github/git-lfs/lfs"
 	"github.com/github/git-lfs/progress"
@@ -13,16 +12,23 @@ import (
 )
 
 var (
-	fetchCmd = &cobra.Command{
-		Use: "fetch",
-		Run: fetchCommand,
-	}
-	fetchIncludeArg string
-	fetchExcludeArg string
-	fetchRecentArg  bool
-	fetchAllArg     bool
-	fetchPruneArg   bool
+	fetchRecentArg bool
+	fetchAllArg    bool
+	fetchPruneArg  bool
 )
+
+func getIncludeExcludeArgs(cmd *cobra.Command) (include, exclude *string) {
+	includeFlag := cmd.Flag("include")
+	excludeFlag := cmd.Flag("exclude")
+	if includeFlag.Changed {
+		include = &includeArg
+	}
+	if excludeFlag.Changed {
+		exclude = &excludeArg
+	}
+
+	return
+}
 
 func fetchCommand(cmd *cobra.Command, args []string) {
 	requireInRepo()
@@ -34,14 +40,14 @@ func fetchCommand(cmd *cobra.Command, args []string) {
 		if err := git.ValidateRemote(args[0]); err != nil {
 			Exit("Invalid remote name %q", args[0])
 		}
-		config.Config.CurrentRemote = args[0]
+		cfg.CurrentRemote = args[0]
 	} else {
 		// Actively find the default remote, don't just assume origin
 		defaultRemote, err := git.DefaultRemote()
 		if err != nil {
 			Exit("No default remote")
 		}
-		config.Config.CurrentRemote = defaultRemote
+		cfg.CurrentRemote = defaultRemote
 	}
 
 	if len(args) > 1 {
@@ -59,20 +65,22 @@ func fetchCommand(cmd *cobra.Command, args []string) {
 	}
 
 	success := true
+	include, exclude := getIncludeExcludeArgs(cmd)
+
 	if fetchAllArg {
 		if fetchRecentArg || len(args) > 1 {
 			Exit("Cannot combine --all with ref arguments or --recent")
 		}
-		if fetchIncludeArg != "" || fetchExcludeArg != "" {
+		if include != nil || exclude != nil {
 			Exit("Cannot combine --all with --include or --exclude")
 		}
-		if len(config.Config.FetchIncludePaths()) > 0 || len(config.Config.FetchExcludePaths()) > 0 {
+		if len(cfg.FetchIncludePaths()) > 0 || len(cfg.FetchExcludePaths()) > 0 {
 			Print("Ignoring global include / exclude paths to fulfil --all")
 		}
 		success = fetchAll()
 
 	} else { // !all
-		includePaths, excludePaths := determineIncludeExcludePaths(config.Config, fetchIncludeArg, fetchExcludeArg)
+		includePaths, excludePaths := determineIncludeExcludePaths(cfg, include, exclude)
 
 		// Fetch refs sequentially per arg order; duplicates in later refs will be ignored
 		for _, ref := range refs {
@@ -81,16 +89,17 @@ func fetchCommand(cmd *cobra.Command, args []string) {
 			success = success && s
 		}
 
-		if fetchRecentArg || config.Config.FetchPruneConfig().FetchRecentAlways {
+		if fetchRecentArg || cfg.FetchPruneConfig().FetchRecentAlways {
 			s := fetchRecent(refs, includePaths, excludePaths)
 			success = success && s
 		}
 	}
 
 	if fetchPruneArg {
-		verify := config.Config.FetchPruneConfig().PruneVerifyRemoteAlways
+		fetchconf := cfg.FetchPruneConfig()
+		verify := fetchconf.PruneVerifyRemoteAlways
 		// no dry-run or verbose options in fetch, assume false
-		prune(verify, false, false)
+		prune(fetchconf, verify, false, false)
 	}
 
 	if !success {
@@ -98,21 +107,12 @@ func fetchCommand(cmd *cobra.Command, args []string) {
 	}
 }
 
-func init() {
-	fetchCmd.Flags().StringVarP(&fetchIncludeArg, "include", "I", "", "Include a list of paths")
-	fetchCmd.Flags().StringVarP(&fetchExcludeArg, "exclude", "X", "", "Exclude a list of paths")
-	fetchCmd.Flags().BoolVarP(&fetchRecentArg, "recent", "r", false, "Fetch recent refs & commits")
-	fetchCmd.Flags().BoolVarP(&fetchAllArg, "all", "a", false, "Fetch all LFS files ever referenced")
-	fetchCmd.Flags().BoolVarP(&fetchPruneArg, "prune", "p", false, "After fetching, prune old data")
-	RootCmd.AddCommand(fetchCmd)
-}
-
 func pointersToFetchForRef(ref string) ([]*lfs.WrappedPointer, error) {
 	// Use SkipDeletedBlobs to avoid fetching ALL previous versions of modified files
 	opts := lfs.NewScanRefsOptions()
 	opts.ScanMode = lfs.ScanRefsMode
 	opts.SkipDeletedBlobs = true
-	return lfs.ScanRefs(ref, "", opts)
+	return lfs.ScanTree(ref)
 }
 
 func fetchRefToChan(ref string, include, exclude []string) chan *lfs.WrappedPointer {
@@ -148,7 +148,7 @@ func fetchPreviousVersions(ref string, since time.Time, include, exclude []strin
 
 // Fetch recent objects based on config
 func fetchRecent(alreadyFetchedRefs []*git.Ref, include, exclude []string) bool {
-	fetchconf := config.Config.FetchPruneConfig()
+	fetchconf := cfg.FetchPruneConfig()
 
 	if fetchconf.FetchRecentRefsDays == 0 && fetchconf.FetchRecentCommitsDays == 0 {
 		return true
@@ -164,7 +164,7 @@ func fetchRecent(alreadyFetchedRefs []*git.Ref, include, exclude []string) bool 
 	if fetchconf.FetchRecentRefsDays > 0 {
 		Print("Fetching recent branches within %v days", fetchconf.FetchRecentRefsDays)
 		refsSince := time.Now().AddDate(0, 0, -fetchconf.FetchRecentRefsDays)
-		refs, err := git.RecentBranches(refsSince, fetchconf.FetchRecentRefsIncludeRemotes, config.Config.CurrentRemote)
+		refs, err := git.RecentBranches(refsSince, fetchconf.FetchRecentRefsIncludeRemotes, cfg.CurrentRemote)
 		if err != nil {
 			Panic(err, "Could not scan for recent refs")
 		}
@@ -245,14 +245,17 @@ func fetchPointers(pointers []*lfs.WrappedPointer, include, exclude []string) bo
 
 // Fetch and report completion of each OID to a channel (optional, pass nil to skip)
 // Returns true if all completed with no errors, false if errors were written to stderr/log
-func fetchAndReportToChan(pointers []*lfs.WrappedPointer, include, exclude []string, out chan<- *lfs.WrappedPointer) bool {
-	totalSize := int64(0)
-	for _, p := range pointers {
-		totalSize += p.Size
-	}
+func fetchAndReportToChan(allpointers []*lfs.WrappedPointer, include, exclude []string, out chan<- *lfs.WrappedPointer) bool {
+	ready, pointers, totalSize := readyAndMissingPointers(allpointers, include, exclude)
 	q := lfs.NewDownloadQueue(len(pointers), totalSize, false)
 
 	if out != nil {
+		// If we already have it, or it won't be fetched
+		// report it to chan immediately to support pull/checkout
+		for _, p := range ready {
+			out <- p
+		}
+
 		dlwatch := q.Watch()
 
 		go func() {
@@ -278,32 +281,8 @@ func fetchAndReportToChan(pointers []*lfs.WrappedPointer, include, exclude []str
 	}
 
 	for _, p := range pointers {
-		// Only add to download queue if local file is not the right size already
-		// This avoids previous case of over-reporting a requirement for files we already have
-		// which would only be skipped by PointerSmudgeObject later
-		passFilter := lfs.FilenamePassesIncludeExcludeFilter(p.Name, include, exclude)
-
-		lfs.LinkOrCopyFromReference(p.Oid, p.Size)
-
-		if !lfs.ObjectExistsOfSize(p.Oid, p.Size) && passFilter {
-			tracerx.Printf("fetch %v [%v]", p.Name, p.Oid)
-			q.Add(lfs.NewDownloadable(p))
-		} else {
-			// Ensure progress matches
-			q.Skip(p.Size)
-			if !passFilter {
-				tracerx.Printf("Skipping %v [%v], include/exclude filters applied", p.Name, p.Oid)
-			} else {
-				tracerx.Printf("Skipping %v [%v], already exists", p.Name, p.Oid)
-			}
-
-			// If we already have it, or it won't be fetched
-			// report it to chan immediately to support pull/checkout
-			if out != nil {
-				out <- p
-			}
-
-		}
+		tracerx.Printf("fetch %v [%v]", p.Name, p.Oid)
+		q.Add(lfs.NewDownloadable(p))
 	}
 
 	processQueue := time.Now()
@@ -313,7 +292,57 @@ func fetchAndReportToChan(pointers []*lfs.WrappedPointer, include, exclude []str
 	ok := true
 	for _, err := range q.Errors() {
 		ok = false
-		ExitWithError(err)
+		FullError(err)
 	}
 	return ok
+}
+
+func readyAndMissingPointers(allpointers []*lfs.WrappedPointer, include, exclude []string) ([]*lfs.WrappedPointer, []*lfs.WrappedPointer, int64) {
+	size := int64(0)
+	seen := make(map[string]bool, len(allpointers))
+	missing := make([]*lfs.WrappedPointer, 0, len(allpointers))
+	ready := make([]*lfs.WrappedPointer, 0, len(allpointers))
+
+	for _, p := range allpointers {
+		// Filtered out by --include or --exclude
+		if !lfs.FilenamePassesIncludeExcludeFilter(p.Name, include, exclude) {
+			continue
+		}
+
+		// no need to download the same object multiple times
+		if seen[p.Oid] {
+			continue
+		}
+
+		seen[p.Oid] = true
+
+		// no need to download objects that exist locally already
+		lfs.LinkOrCopyFromReference(p.Oid, p.Size)
+		if lfs.ObjectExistsOfSize(p.Oid, p.Size) {
+			ready = append(ready, p)
+			continue
+		}
+
+		missing = append(missing, p)
+		size += p.Size
+	}
+
+	return ready, missing, size
+}
+
+func init() {
+	RegisterSubcommand(func() *cobra.Command {
+		cmd := &cobra.Command{
+			Use:    "fetch",
+			PreRun: resolveLocalStorage,
+			Run:    fetchCommand,
+		}
+
+		cmd.Flags().StringVarP(&includeArg, "include", "I", "", "Include a list of paths")
+		cmd.Flags().StringVarP(&excludeArg, "exclude", "X", "", "Exclude a list of paths")
+		cmd.Flags().BoolVarP(&fetchRecentArg, "recent", "r", false, "Fetch recent refs & commits")
+		cmd.Flags().BoolVarP(&fetchAllArg, "all", "a", false, "Fetch all LFS files ever referenced")
+		cmd.Flags().BoolVarP(&fetchPruneArg, "prune", "p", false, "After fetching, prune old data")
+		return cmd
+	})
 }
