@@ -26,7 +26,7 @@ var (
 	latest      = "https://git-lfs.github.com/spec/v1"
 	matcherRE   = regexp.MustCompile("git-media|hawser|git-lfs")
 	extRE       = regexp.MustCompile(`\Aext-\d{1}-\w+`)
-	pointerKeys = []string{"version", "oid", "size"}
+	pointerKeys = []string{"version", "oid", "size", "uc_md5"}
 )
 
 type Pointer struct {
@@ -79,6 +79,9 @@ func (p *Pointer) Encoded() string {
 	}
 	buffer.WriteString(fmt.Sprintf("oid %s:%s\n", p.OidType.Name, p.Oid))
 	buffer.WriteString(fmt.Sprintf("size %d\n", p.Size))
+	if p.OidType.Name == "md5" {
+		buffer.WriteString(fmt.Sprintf("uc_md5 %s\n", p.Oid))
+	}
 	return buffer.String()
 }
 
