@@ -181,4 +181,5 @@ var safeKeys = []string{
 	"lfs.gitprotocol",
 	"lfs.pushurl",
 	"lfs.url",
+	"lfs.oidtype",
 }
