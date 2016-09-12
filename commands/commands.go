@@ -9,19 +9,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/github/git-lfs/api"
 	"github.com/github/git-lfs/config"
 	"github.com/github/git-lfs/errors"
 	"github.com/github/git-lfs/git"
-	"github.com/github/git-lfs/httputil"
 	"github.com/github/git-lfs/lfs"
-	"github.com/github/git-lfs/localstorage"
 	"github.com/github/git-lfs/tools"
 	"github.com/github/git-lfs/transfer"
-	"github.com/spf13/cobra"
 )
 
 // Populate man pages
@@ -32,50 +28,16 @@ var (
 	// various command implementations.
 	API = api.NewClient(nil)
 
-	Debugging       = false
-	ErrorBuffer     = &bytes.Buffer{}
-	ErrorWriter     = io.MultiWriter(os.Stderr, ErrorBuffer)
-	OutputWriter    = io.MultiWriter(os.Stdout, ErrorBuffer)
-	ManPages        = make(map[string]string, 20)
-	cfg             *config.Configuration
-	subcommandFuncs []func() *cobra.Command
-	subcommandMu    sync.Mutex
+	Debugging    = false
+	ErrorBuffer  = &bytes.Buffer{}
+	ErrorWriter  = io.MultiWriter(os.Stderr, ErrorBuffer)
+	OutputWriter = io.MultiWriter(os.Stdout, ErrorBuffer)
+	ManPages     = make(map[string]string, 20)
+	cfg          = config.Config
 
 	includeArg string
 	excludeArg string
 )
-
-func Run() {
-	cfg = config.Config
-
-	root := &cobra.Command{
-		Use: "git-lfs",
-		Run: func(cmd *cobra.Command, args []string) {
-			versionCommand(cmd, args)
-			cmd.Usage()
-		},
-	}
-
-	// Set up help/usage funcs based on manpage text
-	root.SetHelpFunc(help)
-	root.SetHelpTemplate("{{.UsageString}}")
-	root.SetUsageFunc(usage)
-
-	for _, f := range subcommandFuncs {
-		if cmd := f(); cmd != nil {
-			root.AddCommand(cmd)
-		}
-	}
-
-	root.Execute()
-	httputil.LogHttpStats(cfg)
-}
-
-func RegisterSubcommand(fn func() *cobra.Command) {
-	subcommandMu.Lock()
-	subcommandFuncs = append(subcommandFuncs, fn)
-	subcommandMu.Unlock()
-}
 
 // TransferManifest builds a transfer.Manifest from the commands package global
 // cfg var.
@@ -123,7 +85,7 @@ func FullError(err error) {
 
 func errorWith(err error, fatalErrFn func(error, string, ...interface{}), errFn func(string, ...interface{})) {
 	if Debugging || errors.IsFatalError(err) {
-		fatalErrFn(err, "")
+		fatalErrFn(err, "%s", err)
 		return
 	}
 
@@ -139,8 +101,12 @@ func Debug(format string, args ...interface{}) {
 	log.Printf(format, args...)
 }
 
-// LoggedError prints a formatted message to Stderr and writes a stack trace for
-// the error to a log file without exiting.
+// LoggedError prints the given message formatted with its arguments (if any) to
+// Stderr. If an empty string is passed as the "format" arguemnt, only the
+// standard error logging message will be printed, and the error's body will be
+// omitted.
+//
+// It also writes a stack trace for the error to a log file without exiting.
 func LoggedError(err error, format string, args ...interface{}) {
 	if len(format) > 0 {
 		Error(format, args...)
@@ -288,30 +254,6 @@ func determineIncludeExcludePaths(config *config.Configuration, includeArg, excl
 	return
 }
 
-func printHelp(commandName string) {
-	if txt, ok := ManPages[commandName]; ok {
-		fmt.Fprintf(os.Stderr, "%s\n", strings.TrimSpace(txt))
-	} else {
-		fmt.Fprintf(os.Stderr, "Sorry, no usage text found for %q\n", commandName)
-	}
-}
-
-// help is used for 'git-lfs help <command>'
-func help(cmd *cobra.Command, args []string) {
-	if len(args) == 0 {
-		printHelp("git-lfs")
-	} else {
-		printHelp(args[0])
-	}
-
-}
-
-// usage is used for 'git-lfs <command> --help' or when invoked manually
-func usage(cmd *cobra.Command) error {
-	printHelp(cmd.Name())
-	return nil
-}
-
 // isCommandEnabled returns whether the environment variable GITLFS<CMD>ENABLED
 // is "truthy" according to config.Os.Bool (see
 // github.com/github/git-lfs/config#Configuration.Env.Os), returning false
@@ -333,13 +275,6 @@ func requireGitVersion() {
 		}
 		Exit("git version >= %s is required for Git LFS, your version: %s", minimumGit, gitver)
 	}
-}
-
-// resolveLocalStorage implements the `func(*cobra.Command, []string)` signature
-// necessary to wire it up via `cobra.Command.PreRun`. When run, this function
-// will resolve the localstorage directories.
-func resolveLocalStorage(cmd *cobra.Command, args []string) {
-	localstorage.ResolveDirs()
 }
 
 func init() {

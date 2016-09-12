@@ -42,12 +42,7 @@ func fetchCommand(cmd *cobra.Command, args []string) {
 		}
 		cfg.CurrentRemote = args[0]
 	} else {
-		// Actively find the default remote, don't just assume origin
-		defaultRemote, err := git.DefaultRemote()
-		if err != nil {
-			Exit("No default remote")
-		}
-		cfg.CurrentRemote = defaultRemote
+		cfg.CurrentRemote = ""
 	}
 
 	if len(args) > 1 {
@@ -246,6 +241,16 @@ func fetchPointers(pointers []*lfs.WrappedPointer, include, exclude []string) bo
 // Fetch and report completion of each OID to a channel (optional, pass nil to skip)
 // Returns true if all completed with no errors, false if errors were written to stderr/log
 func fetchAndReportToChan(allpointers []*lfs.WrappedPointer, include, exclude []string, out chan<- *lfs.WrappedPointer) bool {
+	// Lazily initialize the current remote.
+	if len(cfg.CurrentRemote) == 0 {
+		// Actively find the default remote, don't just assume origin
+		defaultRemote, err := git.DefaultRemote()
+		if err != nil {
+			Exit("No default remote")
+		}
+		cfg.CurrentRemote = defaultRemote
+	}
+
 	ready, pointers, totalSize := readyAndMissingPointers(allpointers, include, exclude)
 	q := lfs.NewDownloadQueue(len(pointers), totalSize, false)
 
@@ -331,18 +336,11 @@ func readyAndMissingPointers(allpointers []*lfs.WrappedPointer, include, exclude
 }
 
 func init() {
-	RegisterSubcommand(func() *cobra.Command {
-		cmd := &cobra.Command{
-			Use:    "fetch",
-			PreRun: resolveLocalStorage,
-			Run:    fetchCommand,
-		}
-
+	RegisterCommand("fetch", fetchCommand, func(cmd *cobra.Command) {
 		cmd.Flags().StringVarP(&includeArg, "include", "I", "", "Include a list of paths")
 		cmd.Flags().StringVarP(&excludeArg, "exclude", "X", "", "Exclude a list of paths")
 		cmd.Flags().BoolVarP(&fetchRecentArg, "recent", "r", false, "Fetch recent refs & commits")
 		cmd.Flags().BoolVarP(&fetchAllArg, "all", "a", false, "Fetch all LFS files ever referenced")
 		cmd.Flags().BoolVarP(&fetchPruneArg, "prune", "p", false, "After fetching, prune old data")
-		return cmd
 	})
 }
